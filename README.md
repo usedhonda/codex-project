@@ -1,8 +1,8 @@
-# init-cdxapp
+# init-codex-project
 
 Project-local initializer for Codex App workspaces.
 
-`init-cdxapp` creates a private `.local/` memory area, updates the target
+`init-codex-project` creates a private `.local/` memory area, updates the target
 project's `AGENTS.md` with the shared operating contract, and provides an
 encrypted local vault for secrets.
 
@@ -21,20 +21,20 @@ npm link
 From the project you want to initialize:
 
 ```sh
-init-cdxapp
-init-cdxapp "Build a Next.js app. Use Clerk for auth."
+init-codex-project
+init-codex-project "Build a Next.js app. Use Clerk for auth."
 ```
 
 Secret vault commands:
 
 ```sh
-printf '%s' 'example-value' | init-cdxapp secret set api_token
-init-cdxapp secret list
-init-cdxapp secret get api_token
-init-cdxapp secret delete api_token
-init-cdxapp vault key path
-init-cdxapp vault key export
-init-cdxapp vault reset --yes
+printf '%s' 'example-value' | init-codex-project secret set api_token
+init-codex-project secret list
+init-codex-project secret get api_token
+init-codex-project secret delete api_token
+init-codex-project vault key path
+init-codex-project vault key export
+init-codex-project vault reset --yes
 ```
 
 ## Storage Model
@@ -45,7 +45,7 @@ init-cdxapp vault reset --yes
 - Per-chat logs live in `.local/chats/<chat-id>/`.
 - Secrets live encrypted in `.local/vault/secrets.json.enc`.
 - The vault key lives outside the project at
-  `~/.codex/init-cdxapp/keys/<project-id>.key`.
+  `~/.codex/init-codex-project/keys/<project-id>.key`.
 
 Losing the key makes the old vault unrecoverable. Use `vault key export` and
 store the output in a password manager or other trusted backup.
@@ -53,20 +53,20 @@ store the output in a password manager or other trusted backup.
 ## Codex App Skill
 
 Codex App does not support adding arbitrary raw slash commands such as
-`/init-cdxapp` from `~/.codex/prompts`. Use the packaged skill instead.
+`/init-codex-project` from `~/.codex/prompts`. Use the packaged skill instead.
 
-For repo-local use, keep `.agents/skills/init-cdxapp/SKILL.md` in the
+For repo-local use, keep `.agents/skills/init-codex-project/SKILL.md` in the
 repository and invoke it as:
 
 ```text
-$init-cdxapp
-$init-cdxapp Build a Next.js app. Use Clerk for auth.
+$init-codex-project
+$init-codex-project Build a Next.js app. Use Clerk for auth.
 ```
 
 For personal use across projects, copy or symlink the skill directory to:
 
 ```sh
-~/.agents/skills/init-cdxapp
+~/.agents/skills/init-codex-project
 ```
 
 Codex detects skill changes automatically in many cases. If the skill does not

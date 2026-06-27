@@ -1,12 +1,12 @@
 ---
-name: init-cdxapp
-description: Initialize a Codex App project with private .local memory, per-chat logs, AGENTS.md guidance, and an encrypted local secret vault. Use when the user asks for init-cdxapp, init-codex-project, project bootstrap, .local project memory, or Codex App project initialization.
+name: init-codex-project
+description: Initialize a Codex App project with private .local memory, per-chat logs, AGENTS.md guidance, and an encrypted local secret vault. Use when the user asks for init-codex-project, project bootstrap, .local project memory, or Codex App project initialization.
 argument-hint: "[initial project request]"
 ---
 
-# init-cdxapp
+# init-codex-project
 
-Run the `init-cdxapp` CLI from the current project directory.
+Run the `init-codex-project` CLI from the current project directory.
 
 If the user provides text after invoking this skill, treat it as the initial
 project request and pass it to the CLI as one argument. Do not summarize it
@@ -17,13 +17,13 @@ away before execution.
 Use this command from the current working directory:
 
 ```sh
-init-cdxapp "$ARGUMENTS"
+init-codex-project "$ARGUMENTS"
 ```
 
 If there are no arguments, run:
 
 ```sh
-init-cdxapp
+init-codex-project
 ```
 
 After the command finishes, report:
@@ -40,9 +40,9 @@ Do not print secret values.
 Use these commands when the user asks to manage the vault:
 
 ```sh
-init-cdxapp secret <set|get|list|delete>
-init-cdxapp vault key <path|export>
-init-cdxapp vault reset --yes
+init-codex-project secret <set|get|list|delete>
+init-codex-project vault key <path|export>
+init-codex-project vault reset --yes
 ```
 
 For `secret set`, pass the secret value on stdin and do not echo it in chat.
@@ -51,5 +51,5 @@ For `secret set`, pass the secret value on stdin and do not echo it in chat.
 
 - Treat `.local/` as private local state that may contain personal information.
 - Do not commit, paste, or externally transmit `.local/`.
-- If `init-cdxapp` stops because `.local/` is already tracked by git, stop and report the exact blocker.
+- If `init-codex-project` stops because `.local/` is already tracked by git, stop and report the exact blocker.
 - If the vault key is missing, do not create workaround plaintext files. Report that old ciphertext is unrecoverable without the key, then use `vault reset --yes` only when the user asks for reset.

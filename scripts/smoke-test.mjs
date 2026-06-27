@@ -6,9 +6,9 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
-const cli = path.join(root, "bin", "init-cdxapp.mjs");
+const cli = path.join(root, "bin", "init-codex-project.mjs");
 
-const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "init-cdxapp-smoke-"));
+const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "init-codex-project-smoke-"));
 
 try {
   testFreshInitAndVault();
