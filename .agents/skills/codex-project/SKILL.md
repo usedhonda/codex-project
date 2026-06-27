@@ -1,6 +1,6 @@
 ---
 name: codex-project
-description: Codex App プロジェクトを初期化し、.local の共有メモリ、チャット別ログ、AGENTS.md ルール、内部暗号化メモリを作る。codex-project、project bootstrap、.local project memory、Codex App project initialization の依頼で使う。
+description: Codex App の同じプロジェクト内にある複数チャットへ、.local の共有メモリ、チャット別ログ、AGENTS.md ルール、内部暗号化メモリ、project-local hooks を追加する。Codex Project、codex-project、project memory、共有記憶の依頼で使う。
 argument-hint: "[初期プロジェクト指示]"
 ---
 
@@ -10,7 +10,7 @@ argument-hint: "[初期プロジェクト指示]"
 
 ユーザーが skill 呼び出しの後に自由テキストを書いた場合、それは初期プロジェクト指示として扱い、要約せず1つの引数として CLI に渡す。
 
-## 初期化
+## 共有記憶の追加
 
 引数がある場合:
 

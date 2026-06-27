@@ -17,7 +17,7 @@ npm link
 npm run install-skill
 ```
 
-`npm link` で `codex-project` コマンドを使えるようにします。`npm run install-skill` で Codex App から `$codex-project` として呼べるようにします。
+`npm link` で `codex-project` コマンドを使えるようにします。`npm run install-skill` で Codex App のスラッシュ一覧から `Codex Project` を選べるようにします。
 
 ## ユーザーが使うもの
 
@@ -33,7 +33,7 @@ codex-project init
 codex-project init "Next.js の SaaS。認証は Clerk。"
 ```
 
-Codex App では skill として呼びます。
+Codex App では、入力欄で `/` を打って `Codex Project` を選びます。手入力で明示する場合は `$codex-project` も使えます。
 
 ```text
 $codex-project
