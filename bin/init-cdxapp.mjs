@@ -215,7 +215,7 @@ function agentsBlock() {
 - Store passwords, API keys, tokens, and personal secrets only through the encrypted vault. Do not write secret values into plain Markdown logs.
 - The vault ciphertext is \`.local/vault/secrets.json.enc\`; the project key lives outside the repo under \`~/.codex/init-cdxapp/keys/\`.
 - If the vault key is lost, old ciphertext is unrecoverable. Reset by creating a new vault and re-registering secrets from their original sources.
-- When \`/init-cdxapp <free text>\` is used, treat the free text as a user request, not a casual note. Preserve intent, but record conflicts with repo facts in \`.local/conflicts.md\` instead of silently overwriting reality.
+- When \`$init-cdxapp <free text>\` or \`init-cdxapp <free text>\` is used, treat the free text as a user request, not a casual note. Preserve intent, but record conflicts with repo facts in \`.local/conflicts.md\` instead of silently overwriting reality.
 ${INIT_END}`;
 }
 

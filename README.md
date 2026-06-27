@@ -50,11 +50,27 @@ init-cdxapp vault reset --yes
 Losing the key makes the old vault unrecoverable. Use `vault key export` and
 store the output in a password manager or other trusted backup.
 
-## Slash Command
+## Codex App Skill
 
-Install `init-cdxapp.md` as your Codex slash-command prompt and make sure
-`init-cdxapp` is available on `PATH`. The prompt passes any free text after
-`/init-cdxapp` to the CLI as the initial project request.
+Codex App does not support adding arbitrary raw slash commands such as
+`/init-cdxapp` from `~/.codex/prompts`. Use the packaged skill instead.
+
+For repo-local use, keep `.agents/skills/init-cdxapp/SKILL.md` in the
+repository and invoke it as:
+
+```text
+$init-cdxapp
+$init-cdxapp Build a Next.js app. Use Clerk for auth.
+```
+
+For personal use across projects, copy or symlink the skill directory to:
+
+```sh
+~/.agents/skills/init-cdxapp
+```
+
+Codex detects skill changes automatically in many cases. If the skill does not
+appear, restart Codex or open a new chat.
 
 ## Safety Notes
 

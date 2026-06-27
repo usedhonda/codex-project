@@ -16,6 +16,7 @@
   },
   "scripts": {
     "check": "node --check bin/init-cdxapp.mjs && node --check scripts/smoke-test.mjs",
-    "test": "node scripts/smoke-test.mjs"
+    "test": "node scripts/smoke-test.mjs",
+    "install-skill": "mkdir -p ~/.agents/skills && ln -sfn \"$PWD/.agents/skills/init-cdxapp\" ~/.agents/skills/init-cdxapp"
   }
 }
