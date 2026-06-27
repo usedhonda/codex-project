@@ -29,6 +29,7 @@ function testHelpDoesNotInit() {
   const help = run(project, home, ["--help"]);
   assert.match(help, /codex-project init/);
   assert.match(help, /codex-project hooks/);
+  assert.match(help, /codex-project learn/);
   assert.equal(fs.existsSync(path.join(project, ".local")), false);
 
   const unknown = runRaw(project, home, ["--not-a-real-option"]);
@@ -50,6 +51,8 @@ function testFreshInitAndVault() {
   assert.equal(initOutput.includes("vault_key"), false);
 
   assert.ok(fs.existsSync(path.join(project, ".local", "project.md")));
+  assert.ok(fs.existsSync(path.join(project, ".local", "learn", "candidates")));
+  assert.ok(fs.existsSync(path.join(project, ".local", "learn", "rules")));
   assert.ok(fs.existsSync(path.join(project, ".codex", "config.toml")));
   assert.ok(fs.existsSync(path.join(project, ".codex", "hooks.json")));
   assert.ok(fs.existsSync(path.join(project, ".codex", "hooks", "codex-project-context-hook.mjs")));
@@ -89,6 +92,30 @@ function testFreshInitAndVault() {
   assert.match(hookContext, /inbox_pending: 1/);
   assert.equal(hookContext.includes("sensitive shared note"), false);
   assert.equal(hookContext.includes("abc123"), false);
+  run(project, home, ["learn", "add", "mistake", "READMEには未実装機能を既存機能のように書かない"]);
+  const learnList = run(project, home, ["learn", "list"]);
+  assert.match(learnList, /mistake/);
+  assert.match(learnList, /READMEには未実装機能/);
+  const sensitiveLearn = run(project, home, ["learn", "add", "instruction", "api_key=do-not-store"]);
+  assert.match(sensitiveLearn, /sensitive-looking text/);
+  const learnId = learnList.split(/\s+/)[0];
+  const fullContextAfterLearn = run(project, home, ["context"]);
+  assert.match(fullContextAfterLearn, /project_learning:/);
+  assert.match(fullContextAfterLearn, /candidate mistake/);
+  const hookContextAfterLearn = run(project, home, ["context", "--hook"]);
+  assert.match(hookContextAfterLearn, /learning_notes:/);
+  assert.match(hookContextAfterLearn, /candidate mistake/);
+  run(project, home, ["learn", "promote", learnId]);
+  const hookContextAfterPromote = run(project, home, ["context", "--hook"]);
+  assert.match(hookContextAfterPromote, /mistake: READMEには未実装機能/);
+  fs.appendFileSync(
+    path.join(project, ".local", "chats", "thread-smoke-001", "conversation.md"),
+    "- ユーザー指示: コピー用本文はpbcopyを使う\n- ユーザー指示: api_key=do-not-capture\n",
+  );
+  run(project, home, ["learn", "capture"]);
+  const capturedList = run(project, home, ["learn", "list"]);
+  assert.match(capturedList, /コピー用本文はpbcopy/);
+  assert.equal(capturedList.includes("do-not-capture"), false);
   const hooksStatus = run(project, home, ["hooks", "status"]);
   assert.match(hooksStatus, /project_hooks: installed/);
   run(project, home, ["hooks", "remove"]);

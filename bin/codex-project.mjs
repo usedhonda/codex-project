@@ -54,6 +54,11 @@ async function main() {
     return;
   }
 
+  if (args[0] === "learn") {
+    await handleLearnCommand(root, args.slice(1));
+    return;
+  }
+
   if (args[0] === "init") {
     await initializeProject(root, args.slice(1).join(" ").trim());
     return;
@@ -71,6 +76,7 @@ function printHelp() {
   ${COMMAND_NAME} init [initial project request]
   ${COMMAND_NAME} context
   ${COMMAND_NAME} hooks <install|status|remove>
+  ${COMMAND_NAME} learn <add|capture|list|promote|reject> ...
   ${COMMAND_NAME} memory <set|get|list|delete|import> [name] [file]
   ${COMMAND_NAME} secret <set|get|list|delete> [name]
   ${COMMAND_NAME} vault key <path|export>
@@ -96,6 +102,7 @@ async function initializeProject(root, initialRequest) {
   mkdir(chatDir, 0o700);
   mkdir(path.join(localDir, "vault"), 0o700);
   ensureVault(root);
+  ensureLearnDirs(root);
   installHooks(root);
 
   const scan = scanProject(root);
@@ -241,6 +248,76 @@ function handleHooksCommand(root, args) {
   console.log("project hooks removed");
 }
 
+async function handleLearnCommand(root, args) {
+  const action = args[0];
+  if (!["add", "capture", "list", "promote", "reject"].includes(action)) {
+    throw new Error(`usage: ${COMMAND_NAME} learn <add|capture|list|promote|reject> ...`);
+  }
+
+  ensureLocalNotTracked(root);
+  ensureGitignore(root);
+  ensureLearnDirs(root);
+
+  if (action === "add") {
+    const type = args[1];
+    const textArg = args.slice(2).join(" ").trim();
+    const text = textArg || (await readStdin()).trim();
+    if (!["instruction", "mistake", "preference", "rule"].includes(type) || text.length === 0) {
+      throw new Error(`usage: ${COMMAND_NAME} learn add <instruction|mistake|preference|rule> <text>`);
+    }
+    const candidate = createLearningCandidate(root, {
+      type,
+      lesson: text,
+      source: "manual",
+      confidence: type === "instruction" || type === "mistake" ? "high" : "medium",
+    });
+    if (isSensitiveLearningText(candidate.lesson)) {
+      console.log("learning candidate skipped: sensitive-looking text");
+      return;
+    }
+    if (writeLearningCandidate(root, candidate)) {
+      console.log(`learning candidate added: ${candidate.id}`);
+    } else {
+      console.log(`learning candidate already exists: ${candidate.id}`);
+    }
+    return;
+  }
+
+  if (action === "capture") {
+    const candidates = captureLearningCandidates(root);
+    const written = candidates.filter((candidate) => writeLearningCandidate(root, candidate));
+    if (!args.includes("--hook")) {
+      console.log(`learning_candidates_added: ${written.length}`);
+    }
+    return;
+  }
+
+  if (action === "list") {
+    const candidates = readLearningCandidates(root);
+    if (candidates.length === 0) {
+      console.log("no learning candidates");
+      return;
+    }
+    candidates.forEach((candidate) => {
+      console.log(`${candidate.id}\t${candidate.type}\t${candidate.confidence}\t${candidate.lesson}`);
+    });
+    return;
+  }
+
+  const id = args[1];
+  if (!id) {
+    throw new Error(`usage: ${COMMAND_NAME} learn ${action} <id>`);
+  }
+  if (action === "promote") {
+    promoteLearningCandidate(root, id);
+    console.log(`learning candidate promoted: ${id}`);
+    return;
+  }
+  rejectLearningCandidate(root, id);
+  console.log(`learning candidate rejected: ${id}`);
+}
+
+
 async function handleEncryptedNoteCommand(root, args, commandLabel) {
   const action = args[0];
   const name = args[1];
@@ -360,11 +437,20 @@ function printContext(root, options = {}) {
   } else {
     secrets.forEach((name) => console.log(`- ${name}`));
   }
+  const learningNotes = getLearningHookNotes(root);
+  console.log("");
+  console.log("project_learning:");
+  if (learningNotes.length === 0) {
+    console.log("- none");
+  } else {
+    learningNotes.forEach((note) => console.log(`- ${note}`));
+  }
   console.log("");
   console.log("next_steps:");
   console.log("- Read the plain context files above.");
   console.log("- Use `codex-project memory get <name>` only for encrypted project notes needed for this task.");
   console.log("- Use `codex-project secret get <name>` only when the user request requires the secret value; do not print secret values in chat.");
+  console.log("- Treat project_learning entries as project-local guidance, but do not store or expose secrets as learning notes.");
 }
 
 function printHookContext(root, localDir, files, vault) {
@@ -387,6 +473,11 @@ function printHookContext(root, localDir, files, vault) {
   if (fs.existsSync(inboxDir)) {
     const pending = countFiles(path.join(inboxDir, "pending"));
     console.log(`inbox_pending: ${pending}`);
+  }
+  const learningNotes = getLearningHookNotes(root);
+  if (learningNotes.length > 0) {
+    console.log("learning_notes:");
+    learningNotes.forEach((note) => console.log(`- ${note}`));
   }
   console.log("read_more: codex-project context");
 }
@@ -509,6 +600,10 @@ function hookScriptTemplate() {
 import { spawnSync } from "node:child_process";
 
 const root = process.argv[2] || process.cwd();
+spawnSync("codex-project", ["learn", "capture", "--hook"], {
+  cwd: root,
+  encoding: "utf8",
+});
 const result = spawnSync("codex-project", ["context", "--hook"], {
   cwd: root,
   encoding: "utf8",
@@ -518,6 +613,229 @@ if (result.status === 0 && result.stdout) {
   process.stdout.write(result.stdout);
 }
 `;
+}
+
+function ensureLearnDirs(root) {
+  mkdir(path.join(root, ".local", "learn"), 0o700);
+  mkdir(path.join(root, ".local", "learn", "candidates"), 0o700);
+  mkdir(path.join(root, ".local", "learn", "rules"), 0o700);
+  mkdir(path.join(root, ".local", "learn", "rejected"), 0o700);
+}
+
+function createLearningCandidate(root, input) {
+  const lesson = normalizeLearningText(input.lesson);
+  const type = input.type || classifyLearningType(lesson);
+  const id = crypto
+    .createHash("sha256")
+    .update(`${type}\n${lesson.toLowerCase()}`)
+    .digest("hex")
+    .slice(0, 16);
+  return {
+    id,
+    type,
+    lesson,
+    confidence: input.confidence || "medium",
+    source: input.source || "unknown",
+    createdAt: new Date().toISOString(),
+    status: "candidate",
+    projectId: getProjectInfo(root).projectId,
+  };
+}
+
+function writeLearningCandidate(root, candidate) {
+  if (!candidate.lesson || isSensitiveLearningText(candidate.lesson)) {
+    return false;
+  }
+  ensureLearnDirs(root);
+  const candidatePath = getLearningPath(root, "candidates", candidate.id);
+  const rulePath = getLearningPath(root, "rules", candidate.id);
+  const rejectedPath = getLearningPath(root, "rejected", candidate.id);
+  if (fs.existsSync(candidatePath) || fs.existsSync(rulePath) || fs.existsSync(rejectedPath)) {
+    return false;
+  }
+  fs.writeFileSync(candidatePath, `${JSON.stringify(candidate, null, 2)}\n`, { mode: 0o600 });
+  fs.chmodSync(candidatePath, 0o600);
+  return true;
+}
+
+function readLearningCandidates(root) {
+  return readLearningRecords(path.join(root, ".local", "learn", "candidates"));
+}
+
+function readLearningRules(root) {
+  return readLearningRecords(path.join(root, ".local", "learn", "rules"));
+}
+
+function readLearningRecords(dir) {
+  if (!fs.existsSync(dir)) {
+    return [];
+  }
+  return fs
+    .readdirSync(dir)
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => {
+      try {
+        return JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+}
+
+function captureLearningCandidates(root) {
+  const files = learningSourceFiles(root);
+  const candidates = [];
+  for (const filePath of files) {
+    const rel = path.relative(root, filePath);
+    const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
+    lines.forEach((line, index) => {
+      const lesson = extractLearningLesson(line);
+      if (!lesson) {
+        return;
+      }
+      candidates.push(createLearningCandidate(root, {
+        type: classifyLearningType(lesson),
+        lesson,
+        source: `${rel}:${index + 1}`,
+        confidence: learningConfidence(lesson),
+      }));
+    });
+  }
+  return candidates;
+}
+
+function learningSourceFiles(root) {
+  const localDir = path.join(root, ".local");
+  const files = [];
+  [
+    path.join(localDir, "state.md"),
+    path.join(localDir, "decisions.md"),
+    path.join(localDir, "conflicts.md"),
+  ].forEach((filePath) => {
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      files.push(filePath);
+    }
+  });
+
+  const chatsDir = path.join(localDir, "chats");
+  if (fs.existsSync(chatsDir) && fs.statSync(chatsDir).isDirectory()) {
+    for (const chatId of fs.readdirSync(chatsDir)) {
+      for (const name of ["conversation.md", "actions.md"]) {
+        const filePath = path.join(chatsDir, chatId, name);
+        if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+          files.push(filePath);
+        }
+      }
+    }
+  }
+  return files;
+}
+
+function extractLearningLesson(line) {
+  const trimmed = normalizeLearningText(line);
+  if (trimmed.length < 8 || trimmed.length > 240) {
+    return "";
+  }
+  if (isSensitiveLearningText(trimmed)) {
+    return "";
+  }
+  const lower = trimmed.toLowerCase();
+  const markers = [
+    "ユーザー指示",
+    "ユーザー:",
+    "指示",
+    "ミス",
+    "失敗",
+    "やらか",
+    "違う",
+    "禁止",
+    "注意",
+    "好み",
+    "lesson",
+    "mistake",
+    "avoid",
+    "do not",
+    "must",
+    "prefer",
+    "preference",
+  ];
+  if (!markers.some((marker) => lower.includes(marker.toLowerCase()))) {
+    return "";
+  }
+  return trimmed;
+}
+
+function normalizeLearningText(value) {
+  return String(value)
+    .replace(/^\s*[-*]\s*/, "")
+    .replace(/^\s*\d+[.)]\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function classifyLearningType(text) {
+  const lower = text.toLowerCase();
+  if (/(ミス|失敗|やらか|違う|mistake|wrong|regression)/i.test(lower)) {
+    return "mistake";
+  }
+  if (/(指示|禁止|must|do not|never|絶対|必ず)/i.test(lower)) {
+    return "instruction";
+  }
+  if (/(好み|prefer|preference|ほしい|嫌)/i.test(lower)) {
+    return "preference";
+  }
+  return "rule";
+}
+
+function learningConfidence(text) {
+  const type = classifyLearningType(text);
+  return type === "instruction" || type === "mistake" ? "high" : "medium";
+}
+
+function isSensitiveLearningText(text) {
+  return /\b(password|passwd|pass|api[_-]?key|token|secret|credential|passport|pin|ssn)\b\s*[:=]/i.test(text);
+}
+
+function promoteLearningCandidate(root, id) {
+  ensureLearnDirs(root);
+  const candidatePath = getLearningPath(root, "candidates", id);
+  if (!fs.existsSync(candidatePath)) {
+    throw new Error(`learning candidate not found: ${id}`);
+  }
+  const candidate = JSON.parse(fs.readFileSync(candidatePath, "utf8"));
+  candidate.status = "rule";
+  candidate.promotedAt = new Date().toISOString();
+  const rulePath = getLearningPath(root, "rules", id);
+  fs.writeFileSync(rulePath, `${JSON.stringify(candidate, null, 2)}\n`, { mode: 0o600 });
+  fs.chmodSync(rulePath, 0o600);
+  fs.unlinkSync(candidatePath);
+}
+
+function rejectLearningCandidate(root, id) {
+  ensureLearnDirs(root);
+  const candidatePath = getLearningPath(root, "candidates", id);
+  if (!fs.existsSync(candidatePath)) {
+    throw new Error(`learning candidate not found: ${id}`);
+  }
+  const candidate = JSON.parse(fs.readFileSync(candidatePath, "utf8"));
+  candidate.status = "rejected";
+  candidate.rejectedAt = new Date().toISOString();
+  const rejectedPath = getLearningPath(root, "rejected", id);
+  fs.writeFileSync(rejectedPath, `${JSON.stringify(candidate, null, 2)}\n`, { mode: 0o600 });
+  fs.chmodSync(rejectedPath, 0o600);
+  fs.unlinkSync(candidatePath);
+}
+
+function getLearningHookNotes(root) {
+  const rules = readLearningRules(root).map((record) => `${record.type}: ${record.lesson}`);
+  const candidates = readLearningCandidates(root).map((record) => `candidate ${record.type}: ${record.lesson}`);
+  return [...rules, ...candidates].slice(-3);
+}
+
+function getLearningPath(root, bucket, id) {
+  return path.join(root, ".local", "learn", bucket, `${id}.json`);
 }
 
 function ensureLocalNotTracked(root) {
@@ -579,8 +897,10 @@ function agentsBlock() {
 - Never commit, upload, paste, or externally transmit \`.local/\` contents unless the user explicitly asks for a specific item.
 - At the start of each chat, read these files when present: \`.local/project.md\`, \`.local/state.md\`, \`.local/decisions.md\`, and \`.local/index.md\`.
 - At the start of each chat, also run \`codex-project context\` to list encrypted vault notes and secret names without exposing secret values.
-- Project-local Codex hooks are installed under \`.codex/\` by default. They run \`codex-project context --hook\` before user prompts so chats can notice shared state, future inbox entries, and handoff files without exposing secret values.
+- Project-local Codex hooks are installed under \`.codex/\` by default. They run \`codex-project context --hook\` before user prompts so chats can notice shared state and learning notes without exposing secret values.
 - Encrypted project notes are readable with \`codex-project memory get <name>\`. Read only notes relevant to the current task, and do not paste sensitive content into chat unless explicitly needed.
+- When the user corrects Codex, points out a mistake, gives a durable instruction, or states a likely reusable preference, log it in \`.local/chats/<chat-id>/conversation.md\` and add a learning candidate with \`codex-project learn add <instruction|mistake|preference|rule> "<lesson>"\`.
+- Treat learning candidates as project-local guidance. Apply obvious high-confidence lessons in future chats, but do not store secrets or raw private values as learning notes.
 - Use \`CODEX_THREAD_ID\` as this chat's id when available. If it is absent, use a generated \`YYYYMMDD-HHMMSS-<random>\` id and note that same-chat identity is not guaranteed.
 - Keep chat-local notes under \`.local/chats/<chat-id>/\`: \`session.md\`, \`actions.md\`, and \`conversation.md\`.
 - Log meaningful work in \`.local/chats/<chat-id>/actions.md\`. Log important user instructions, decisions, and handoff context in \`conversation.md\`.
