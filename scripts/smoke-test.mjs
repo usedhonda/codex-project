@@ -6,17 +6,34 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
-const cli = path.join(root, "bin", "init-codex-project.mjs");
+const cli = path.join(root, "bin", "codex-project.mjs");
 
-const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "init-codex-project-smoke-"));
+const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-project-smoke-"));
 
 try {
+  testHelpDoesNotInit();
   testFreshInitAndVault();
   testTrackedLocalStops();
   testMissingKeyAndReset();
   console.log("smoke tests passed");
 } finally {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
+}
+
+function testHelpDoesNotInit() {
+  const home = path.join(tmpRoot, "home-help");
+  const project = path.join(tmpRoot, "project-help");
+  fs.mkdirSync(home, { recursive: true });
+  fs.mkdirSync(project, { recursive: true });
+
+  const help = run(project, home, ["--help"]);
+  assert.match(help, /codex-project init/);
+  assert.equal(fs.existsSync(path.join(project, ".local")), false);
+
+  const unknown = runRaw(project, home, ["--not-a-real-option"]);
+  assert.notEqual(unknown.status, 0);
+  assert.match(unknown.stderr, /unknown option/);
+  assert.equal(fs.existsSync(path.join(project, ".local")), false);
 }
 
 function testFreshInitAndVault() {
@@ -26,7 +43,7 @@ function testFreshInitAndVault() {
   fs.mkdirSync(project, { recursive: true });
   fs.writeFileSync(path.join(project, "README.md"), "# Demo\n");
 
-  const initOutput = run(project, home, ["Demo app. api_key=abc123"], {
+  const initOutput = run(project, home, ["init", "Demo app. api_key=abc123"], {
     CODEX_THREAD_ID: "thread-smoke-001",
   });
   assert.equal(initOutput.includes("vault_key"), false);
@@ -66,6 +83,15 @@ function testFreshInitAndVault() {
   assert.ok(fs.existsSync(keyPath));
   const keyExport = run(project, home, ["vault", "key", "export"]).trim();
   assert.equal(Buffer.from(keyExport, "base64").length, 32);
+
+  const legacyKeyPath = keyPath.replace(
+    `${path.sep}.codex${path.sep}codex-project${path.sep}`,
+    `${path.sep}.codex${path.sep}init-codex-project${path.sep}`,
+  );
+  fs.mkdirSync(path.dirname(legacyKeyPath), { recursive: true });
+  fs.renameSync(keyPath, legacyKeyPath);
+  assert.match(run(project, home, ["secret", "list"]), /^initial_api_key$/m);
+  assert.ok(fs.existsSync(keyPath));
 }
 
 function testTrackedLocalStops() {
@@ -77,7 +103,7 @@ function testTrackedLocalStops() {
   execFileSync("git", ["init", "-q"], { cwd: project });
   execFileSync("git", ["add", ".local/secret.txt"], { cwd: project });
 
-  const result = runRaw(project, home, []);
+  const result = runRaw(project, home, ["init"]);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /\.local is already tracked by git/);
   assert.match(result.stderr, /git rm --cached -r \.local/);
@@ -89,7 +115,7 @@ function testMissingKeyAndReset() {
   fs.mkdirSync(home, { recursive: true });
   fs.mkdirSync(project, { recursive: true });
 
-  run(project, home, []);
+  run(project, home, ["init"]);
   run(project, home, ["secret", "set", "demo"], {}, "dummy-secret-value");
   const keyPath = run(project, home, ["vault", "key", "path"]).trim();
   fs.renameSync(keyPath, `${keyPath}.saved`);

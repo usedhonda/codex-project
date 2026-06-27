@@ -1,22 +1,23 @@
 {
-  "name": "init-codex-project",
+  "name": "codex-project",
   "version": "0.1.0",
-  "description": "Initialize Codex App projects with private local memory and an encrypted secret vault.",
+  "description": "Manage Codex App project-local memory, context, and encrypted notes.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "init-codex-project": "./bin/init-codex-project.mjs"
+    "codex-project": "./bin/codex-project.mjs",
+    "init-codex-project": "./bin/codex-project.mjs"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/usedhonda/init-codex-project.git"
+    "url": "git+https://github.com/usedhonda/codex-project.git"
   },
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "check": "node --check bin/init-codex-project.mjs && node --check scripts/smoke-test.mjs",
+    "check": "node --check bin/codex-project.mjs && node --check scripts/smoke-test.mjs",
     "test": "node scripts/smoke-test.mjs",
-    "install-skill": "mkdir -p ~/.agents/skills && ln -sfn \"$PWD/.agents/skills/init-codex-project\" ~/.agents/skills/init-codex-project"
+    "install-skill": "mkdir -p ~/.agents/skills && ln -sfn \"$PWD/.agents/skills/codex-project\" ~/.agents/skills/codex-project && rm -f ~/.agents/skills/init-codex-project"
   }
 }

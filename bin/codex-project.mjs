@@ -5,19 +5,27 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-const INIT_START = "<!-- INIT-CDXAPP -->";
-const INIT_END = "<!-- INIT-CDXAPP-END -->";
+const COMMAND_NAME = "codex-project";
+const INIT_START = "<!-- CODEX-PROJECT-MEMORY -->";
+const INIT_END = "<!-- CODEX-PROJECT-MEMORY-END -->";
+const LEGACY_INIT_START = "<!-- INIT-CDXAPP -->";
+const LEGACY_INIT_END = "<!-- INIT-CDXAPP-END -->";
 const VAULT_VERSION = 1;
 const ALGORITHM = "aes-256-gcm";
 
 main().catch((error) => {
-  console.error(`init-codex-project: ${error.message}`);
+  console.error(`${COMMAND_NAME}: ${error.message}`);
   process.exit(1);
 });
 
 async function main() {
   const args = process.argv.slice(2);
   const root = process.cwd();
+
+  if (args[0] === "--help" || args[0] === "-h") {
+    printHelp();
+    return;
+  }
 
   if (args[0] === "secret") {
     await handleSecretCommand(root, args.slice(1));
@@ -39,7 +47,30 @@ async function main() {
     return;
   }
 
+  if (args[0] === "init") {
+    await initializeProject(root, args.slice(1).join(" ").trim());
+    return;
+  }
+
+  if (args[0]?.startsWith("-")) {
+    throw new Error(`unknown option: ${args[0]}\nRun \`${COMMAND_NAME} --help\` for usage.`);
+  }
+
   await initializeProject(root, args.join(" ").trim());
+}
+
+function printHelp() {
+  console.log(`Usage:
+  ${COMMAND_NAME} init [initial project request]
+  ${COMMAND_NAME} context
+  ${COMMAND_NAME} memory <set|get|list|delete|import> [name] [file]
+  ${COMMAND_NAME} secret <set|get|list|delete> [name]
+  ${COMMAND_NAME} vault key <path|export>
+  ${COMMAND_NAME} vault reset --yes
+
+Default:
+  ${COMMAND_NAME} [initial project request]  # compatibility shorthand for init
+`);
 }
 
 async function initializeProject(root, initialRequest) {
@@ -91,7 +122,7 @@ async function handleSecretCommand(root, args) {
   const name = args[1];
 
   if (!["set", "get", "list", "delete"].includes(action)) {
-    throw new Error("usage: init-codex-project secret <set|get|list|delete> [name]");
+    throw new Error(`usage: ${COMMAND_NAME} secret <set|get|list|delete> [name]`);
   }
 
   ensureLocalNotTracked(root);
@@ -105,7 +136,7 @@ async function handleSecretCommand(root, args) {
   }
 
   if (!name) {
-    throw new Error(`usage: init-codex-project secret ${action} <name>`);
+    throw new Error(`usage: ${COMMAND_NAME} secret ${action} <name>`);
   }
   validateSecretName(name);
 
@@ -172,7 +203,7 @@ async function handleVaultCommand(root, args) {
     return;
   }
 
-  throw new Error("usage: init-codex-project vault key <path|export> | vault note <set|get|list|delete|import> | vault reset --yes");
+  throw new Error(`usage: ${COMMAND_NAME} vault key <path|export> | vault note <set|get|list|delete|import> | vault reset --yes`);
 }
 
 async function handleMemoryCommand(root, args) {
@@ -184,7 +215,7 @@ async function handleEncryptedNoteCommand(root, args, commandLabel) {
   const name = args[1];
 
   if (!["set", "get", "list", "delete", "import"].includes(action)) {
-    throw new Error(`usage: init-codex-project ${commandLabel} <set|get|list|delete|import> [name] [file]`);
+    throw new Error(`usage: ${COMMAND_NAME} ${commandLabel} <set|get|list|delete|import> [name] [file]`);
   }
 
   ensureLocalNotTracked(root);
@@ -200,7 +231,7 @@ async function handleEncryptedNoteCommand(root, args, commandLabel) {
   }
 
   if (!name) {
-    throw new Error(`usage: init-codex-project ${commandLabel} ${action} <name>`);
+    throw new Error(`usage: ${COMMAND_NAME} ${commandLabel} ${action} <name>`);
   }
   validateSecretName(name);
 
@@ -222,7 +253,7 @@ async function handleEncryptedNoteCommand(root, args, commandLabel) {
   if (action === "import") {
     const fileArg = args[2];
     if (!fileArg) {
-      throw new Error(`usage: init-codex-project ${commandLabel} import <name> <file>`);
+      throw new Error(`usage: ${COMMAND_NAME} ${commandLabel} import <name> <file>`);
     }
     const filePath = path.resolve(root, fileArg);
     if (!filePath.startsWith(`${root}${path.sep}`)) {
@@ -272,7 +303,7 @@ function printContext(root) {
   ].filter((file) => fs.existsSync(path.join(localDir, file)));
   const vault = readVault(root);
   normalizeVault(vault);
-  console.log("# init-codex-project context");
+  console.log("# codex-project context");
   console.log("");
   console.log(`local_memory: ${localDir}`);
   console.log("");
@@ -297,8 +328,8 @@ function printContext(root) {
   console.log("");
   console.log("next_steps:");
   console.log("- Read the plain context files above.");
-  console.log("- Use `init-codex-project memory get <name>` only for encrypted project notes needed for this task.");
-  console.log("- Use `init-codex-project secret get <name>` only when the user request requires the secret value; do not print secret values in chat.");
+  console.log("- Use `codex-project memory get <name>` only for encrypted project notes needed for this task.");
+  console.log("- Use `codex-project secret get <name>` only when the user request requires the secret value; do not print secret values in chat.");
 }
 
 function ensureLocalNotTracked(root) {
@@ -319,7 +350,7 @@ function ensureLocalNotTracked(root) {
 
 function ensureGitignore(root) {
   const gitignorePath = path.join(root, ".gitignore");
-  const marker = "# init-codex-project local private memory";
+  const marker = "# codex-project local private memory";
   const entry = ".local/";
   const current = readTextIfExists(gitignorePath);
   if (current.split(/\r?\n/).some((line) => line.trim() === entry)) {
@@ -332,8 +363,9 @@ function ensureGitignore(root) {
 function upsertAgentsBlock(agentsPath) {
   const current = readTextIfExists(agentsPath);
   const block = agentsBlock();
-  if (current.includes(INIT_START) && current.includes(INIT_END)) {
-    const pattern = new RegExp(`${escapeRegExp(INIT_START)}[\\s\\S]*?${escapeRegExp(INIT_END)}`);
+  const markerPair = findAgentsMarkerPair(current);
+  if (markerPair) {
+    const pattern = new RegExp(`${escapeRegExp(markerPair.start)}[\\s\\S]*?${escapeRegExp(markerPair.end)}`);
     fs.writeFileSync(agentsPath, `${current.replace(pattern, block).trimEnd()}\n`);
     return;
   }
@@ -341,23 +373,33 @@ function upsertAgentsBlock(agentsPath) {
   fs.writeFileSync(agentsPath, `${current}${prefix}\n${block}\n`);
 }
 
+function findAgentsMarkerPair(text) {
+  if (text.includes(INIT_START) && text.includes(INIT_END)) {
+    return { start: INIT_START, end: INIT_END };
+  }
+  if (text.includes(LEGACY_INIT_START) && text.includes(LEGACY_INIT_END)) {
+    return { start: LEGACY_INIT_START, end: LEGACY_INIT_END };
+  }
+  return null;
+}
+
 function agentsBlock() {
   return `${INIT_START}
-## init-codex-project Project Memory Contract
+## codex-project Project Memory Contract
 
 - Treat \`.local/\` as private, project-local memory. It may contain personal data, credentials, and sensitive operational notes.
 - Never commit, upload, paste, or externally transmit \`.local/\` contents unless the user explicitly asks for a specific item.
 - At the start of each chat, read these files when present: \`.local/project.md\`, \`.local/state.md\`, \`.local/decisions.md\`, and \`.local/index.md\`.
-- At the start of each chat, also run \`init-codex-project context\` to list encrypted vault notes and secret names without exposing secret values.
-- Encrypted project notes are readable with \`init-codex-project memory get <name>\`. Read only notes relevant to the current task, and do not paste sensitive content into chat unless explicitly needed.
+- At the start of each chat, also run \`codex-project context\` to list encrypted vault notes and secret names without exposing secret values.
+- Encrypted project notes are readable with \`codex-project memory get <name>\`. Read only notes relevant to the current task, and do not paste sensitive content into chat unless explicitly needed.
 - Use \`CODEX_THREAD_ID\` as this chat's id when available. If it is absent, use a generated \`YYYYMMDD-HHMMSS-<random>\` id and note that same-chat identity is not guaranteed.
 - Keep chat-local notes under \`.local/chats/<chat-id>/\`: \`session.md\`, \`actions.md\`, and \`conversation.md\`.
 - Log meaningful work in \`.local/chats/<chat-id>/actions.md\`. Log important user instructions, decisions, and handoff context in \`conversation.md\`.
 - Keep shared current state in \`.local/state.md\`; keep durable project decisions in \`.local/decisions.md\`.
 - Store passwords, API keys, tokens, personal secrets, and sensitive project notes only through the encrypted store. Do not write secret values into plain Markdown logs.
-- Encryption keys are managed internally by init-codex-project. The user normally should not need to handle them.
+- Encryption keys are managed internally by codex-project. The user normally should not need to handle them.
 - If encrypted storage cannot be opened, report the blocker and use reset only when the user explicitly asks.
-- When \`$init-codex-project <free text>\` or \`init-codex-project <free text>\` is used, treat the free text as a user request, not a casual note. Preserve intent, but record conflicts with repo facts in \`.local/conflicts.md\` instead of silently overwriting reality.
+- When \`$codex-project <free text>\`, \`codex-project init <free text>\`, or \`codex-project <free text>\` is used, treat the free text as a user request, not a casual note. Preserve intent, but record conflicts with repo facts in \`.local/conflicts.md\` instead of silently overwriting reality.
 ${INIT_END}`;
 }
 
@@ -377,7 +419,7 @@ function ensureChatFiles(chatDir, chatId, project, storedRequest, now) {
   );
   ensureFile(
     path.join(chatDir, "actions.md"),
-    ["# Actions", "", `- ${now.toISOString()}: init-codex-project initialized this chat workspace.`, ""].join("\n"),
+    ["# Actions", "", `- ${now.toISOString()}: codex-project initialized this chat workspace.`, ""].join("\n"),
     0o600,
   );
   ensureFile(
@@ -466,7 +508,7 @@ function stateTemplate(now) {
     "# State",
     "",
     `- updated_at: ${now.toISOString()}`,
-    "- current_status: Initialized by init-codex-project.",
+    "- current_status: Initialized by codex-project.",
     "- next_action: Update this after each meaningful work session.",
     "",
   ].join("\n");
@@ -477,7 +519,7 @@ function decisionsTemplate(now) {
     "# Decisions",
     "",
     `- ${now.toISOString()}: Use .local/ as private project memory; keep it out of git.`,
-    `- ${now.toISOString()}: Use init-codex-project encrypted storage for secrets and sensitive project notes.`,
+    `- ${now.toISOString()}: Use codex-project encrypted storage for secrets and sensitive project notes.`,
     "",
   ].join("\n");
 }
@@ -486,7 +528,7 @@ function conflictsTemplate(now) {
   return [
     "# Conflicts",
     "",
-    `- ${now.toISOString()}: No conflicts recorded by init-codex-project.`,
+    `- ${now.toISOString()}: No conflicts recorded by codex-project.`,
     "",
   ].join("\n");
 }
@@ -616,13 +658,13 @@ function ensureVault(root) {
 }
 
 function readProjectKey(projectId) {
-  const keyPath = getKeyPath(projectId);
+  const keyPath = migrateLegacyKeyIfNeeded(projectId);
   if (!fs.existsSync(keyPath)) {
     throw new Error(
       [
         "encrypted storage cannot be opened because its internal key is missing.",
         "Existing encrypted data cannot be decrypted without that key.",
-        "Restore the key from backup, or run: init-codex-project vault reset --yes",
+        `Restore the key from backup, or run: ${COMMAND_NAME} vault reset --yes`,
       ].join("\n"),
     );
   }
@@ -687,6 +729,10 @@ function resetVault(root) {
   if (fs.existsSync(keyPath)) {
     fs.renameSync(keyPath, `${keyPath}.lost-${formatDateForId(new Date())}`);
   }
+  const legacyKeyPath = getLegacyKeyPath(getProjectInfo(root).projectId);
+  if (fs.existsSync(legacyKeyPath)) {
+    fs.renameSync(legacyKeyPath, `${legacyKeyPath}.lost-${formatDateForId(new Date())}`);
+  }
   readOrCreateProjectKey(getProjectInfo(root).projectId);
   writeVault(root, createEmptyVault());
 }
@@ -706,13 +752,24 @@ function normalizeVault(vault) {
 }
 
 function readOrCreateProjectKey(projectId) {
-  const keyPath = getKeyPath(projectId);
+  const keyPath = migrateLegacyKeyIfNeeded(projectId);
   mkdir(path.dirname(keyPath), 0o700);
   if (!fs.existsSync(keyPath)) {
     fs.writeFileSync(keyPath, `${crypto.randomBytes(32).toString("hex")}\n`, { mode: 0o600 });
     fs.chmodSync(keyPath, 0o600);
   }
   return parseProjectKey(keyPath);
+}
+
+function migrateLegacyKeyIfNeeded(projectId) {
+  const keyPath = getKeyPath(projectId);
+  const legacyKeyPath = getLegacyKeyPath(projectId);
+  if (!fs.existsSync(keyPath) && fs.existsSync(legacyKeyPath)) {
+    mkdir(path.dirname(keyPath), 0o700);
+    fs.copyFileSync(legacyKeyPath, keyPath);
+    fs.chmodSync(keyPath, 0o600);
+  }
+  return keyPath;
 }
 
 function parseProjectKey(keyPath) {
@@ -729,6 +786,10 @@ function getVaultPath(root) {
 }
 
 function getKeyPath(projectId) {
+  return path.join(os.homedir(), ".codex", "codex-project", "keys", `${projectId}.key`);
+}
+
+function getLegacyKeyPath(projectId) {
   return path.join(os.homedir(), ".codex", "init-codex-project", "keys", `${projectId}.key`);
 }
 

@@ -2,7 +2,7 @@
 .cc-status-bar.voice.json
 # <<< project-bootstrap managed <<<
 
-# init-cdxapp private project memory
+# codex-project private project memory
 .local/
 
 # Local Codex/bootstrap state

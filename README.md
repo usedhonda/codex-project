@@ -1,35 +1,35 @@
-# init-codex-project
+# codex-project
 
 Codex App で新しいプロジェクトを始めるときに、プロジェクト内だけで共有する記憶領域を作る初期化ツールです。
 
-`init-codex-project` は `.local/` を作り、後続チャットが読むべき `AGENTS.md` の管理ブロックを追加し、個人情報やパスワードを内部的に暗号化して保存できるようにします。
+`codex-project` は `.local/` を作り、後続チャットが読むべき `AGENTS.md` の管理ブロックを追加し、個人情報やパスワードを内部的に暗号化して保存できるようにします。
 
 ## インストール
 
 ```sh
-git clone https://github.com/usedhonda/init-codex-project.git
-cd init-codex-project
+git clone https://github.com/usedhonda/codex-project.git
+cd codex-project
 npm link
 npm run install-skill
 ```
 
-`npm link` で `init-codex-project` コマンドを使えるようにします。
-`npm run install-skill` で Codex App から `$init-codex-project` として呼べるようにします。
+`npm link` で `codex-project` コマンドを使えるようにします。
+`npm run install-skill` で Codex App から `$codex-project` として呼べるようにします。
 
 ## 使い方
 
 対象プロジェクトのフォルダで実行します。
 
 ```sh
-init-codex-project
-init-codex-project "Next.js の SaaS。認証は Clerk。"
+codex-project init
+codex-project init "Next.js の SaaS。認証は Clerk。"
 ```
 
 Codex App では skill として呼びます。
 
 ```text
-$init-codex-project
-$init-codex-project Next.js の SaaS。認証は Clerk。
+$codex-project
+$codex-project Next.js の SaaS。認証は Clerk。
 ```
 
 ## 何が作られるか
@@ -51,16 +51,16 @@ $init-codex-project Next.js の SaaS。認証は Clerk。
 他のチャットに読ませたいが、平文 Markdown には置きたくない内容は `memory` に入れます。
 
 ```sh
-printf '%s' 'ここに個人情報を含む共有メモ' | init-codex-project memory set account
-init-codex-project memory list
-init-codex-project memory get account
-init-codex-project memory delete account
+printf '%s' 'ここに個人情報を含む共有メモ' | codex-project memory set account
+codex-project memory list
+codex-project memory get account
+codex-project memory delete account
 ```
 
 既存ファイルを暗号化メモへ取り込む場合:
 
 ```sh
-init-codex-project memory import account .local/account-credentials.md
+codex-project memory import account .local/account-credentials.md
 ```
 
 取り込み後も元の平文ファイルは自動削除しません。内容を確認して、不要ならユーザーの明示指示で削除してください。
@@ -70,10 +70,10 @@ init-codex-project memory import account .local/account-credentials.md
 API キーやパスワードのような単体の秘密値は `secret` に入れます。
 
 ```sh
-printf '%s' 'example-value' | init-codex-project secret set api_token
-init-codex-project secret list
-init-codex-project secret get api_token
-init-codex-project secret delete api_token
+printf '%s' 'example-value' | codex-project secret set api_token
+codex-project secret list
+codex-project secret get api_token
+codex-project secret delete api_token
 ```
 
 `secret get` は値そのものを出力します。Codex は必要なときだけ使い、チャット本文には表示しないでください。
@@ -83,13 +83,13 @@ init-codex-project secret delete api_token
 `AGENTS.md` の管理ブロックにより、後続チャットは開始時に以下を行います。
 
 ```sh
-init-codex-project context
+codex-project context
 ```
 
 これで平文の共有ファイル、暗号化メモ名、秘密値名だけを一覧できます。暗号化メモの本文が必要な場合だけ、次を使います。
 
 ```sh
-init-codex-project memory get <name>
+codex-project memory get <name>
 ```
 
 ## 注意点
