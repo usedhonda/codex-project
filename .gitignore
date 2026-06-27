@@ -1,0 +1,27 @@
+# >>> project-bootstrap managed >>>
+.cc-status-bar.voice.json
+# <<< project-bootstrap managed <<<
+
+# init-cdxapp private project memory
+.local/
+
+# Local Codex/bootstrap state
+.codex/
+AGENTS.md
+CLAUDE.md
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# Node/cache/build output
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+.cache/
+coverage/
+dist/
+build/

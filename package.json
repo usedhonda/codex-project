@@ -1,0 +1,21 @@
+{
+  "name": "init-cdxapp",
+  "version": "0.1.0",
+  "description": "Initialize Codex App projects with private local memory and an encrypted secret vault.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "init-cdxapp": "./bin/init-cdxapp.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/usedhonda/init-codex-project.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check": "node --check bin/init-cdxapp.mjs && node --check scripts/smoke-test.mjs",
+    "test": "node scripts/smoke-test.mjs"
+  }
+}
