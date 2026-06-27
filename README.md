@@ -4,15 +4,9 @@
 
 Codex App では、1つのプロジェクトフォルダから複数のチャットを作れます。ただし、別チャットの会話内容が自動で共有されるわけではありません。`codex-project` は、その隙間を `.local/`、`AGENTS.md`、暗号化メモ、project-local hooks で補います。
 
-これはプロジェクトを作り直すツールではありません。既存のソースコードやドキュメントを消さずに、共有記憶のためのファイルを追加します。
+ユーザーが直接使うのは、基本的に最初の1回だけです。その後の `context`、`memory`、`secret`、`hooks` などの補助コマンドは、主に Codex が `AGENTS.md` と hooks に従って使います。
 
-## できること
-
-- プロジェクト内だけの共有メモリを `.local/` に作る
-- チャットごとの作業ログ置き場を作る
-- 後続チャットが読むべき `AGENTS.md` ルールを追加する
-- 個人情報、パスワード、API キー、共有したい秘密メモを内部的に暗号化して保存する
-- このプロジェクト内だけで動く Codex hooks を入れ、各ターン前に共有状態を短く表示する
+既存のソースコードやドキュメントを消さずに、共有記憶のためのファイルだけを追加します。
 
 ## インストール
 
@@ -25,18 +19,19 @@ npm run install-skill
 
 `npm link` で `codex-project` コマンドを使えるようにします。`npm run install-skill` で Codex App から `$codex-project` として呼べるようにします。
 
-## プロジェクトに共有記憶を追加する
+## ユーザーが使うもの
 
-対象プロジェクトのフォルダで実行します。
+対象プロジェクトのフォルダで、最初に1回だけ実行します。
 
 ```sh
 codex-project init
-codex-project init "Next.js の SaaS。認証は Clerk。"
 ```
 
-ここでの `init` は「共有記憶を追加セットアップする」という意味です。既存プロジェクトの削除、上書きリセット、作り直しはしません。すでに開発中のプロジェクトにもあとから導入できます。
+初期情報を一緒に渡すこともできます。
 
-`.local/` がすでに git で追跡されている場合だけ、安全のため停止します。
+```sh
+codex-project init "Next.js の SaaS。認証は Clerk。"
+```
 
 Codex App では skill として呼びます。
 
@@ -44,6 +39,10 @@ Codex App では skill として呼びます。
 $codex-project
 $codex-project Next.js の SaaS。認証は Clerk。
 ```
+
+ここでの `init` は「共有記憶を追加セットアップする」という意味です。既存のソースコードやドキュメントは変更しません。すでに開発中のプロジェクトにもあとから導入できます。
+
+`.local/` がすでに git で追跡されている場合だけ、安全のため停止します。
 
 ## 追加されるもの
 
@@ -60,37 +59,44 @@ $codex-project Next.js の SaaS。認証は Clerk。
 
 `.local/` は `.gitignore` に追加されます。個人情報や秘密情報が入る前提なので、リポジトリには入れません。
 
-## 後続チャットで読む
+## Codex が使うもの
 
-後続チャットは、まず次を実行すると現在の共有状態を確認できます。
+以下のコマンドは、ユーザーが普段直接使うためのものではありません。Codex が後続チャットで共有状態を読む、必要な暗号化メモだけを取り出す、project-local hooks を動かす、といった用途で使います。
 
 ```sh
 codex-project context
-```
-
-表示されるのは、平文の共有ファイル、暗号化メモ名、秘密値名だけです。暗号化メモや秘密値の本文は表示しません。
-
-必要な暗号化メモだけ、明示的に読みます。
-
-```sh
-codex-project memory get <name>
-```
-
-hook からは短い表示だけを使います。
-
-```sh
 codex-project context --hook
+codex-project memory get <name>
+codex-project secret get <name>
+codex-project hooks status
 ```
 
-## 暗号化メモ
+`context` は、平文の共有ファイル、暗号化メモ名、秘密値名だけを表示します。暗号化メモや秘密値の本文は表示しません。
 
-他のチャットに読ませたいが、平文 Markdown には置きたくない内容は `memory` に入れます。
+`context --hook` は、各ターン前に hooks から呼ばれる短い表示用です。
+
+`memory get` と `secret get` は本文や値を出力します。Codex は必要な処理だけに使い、チャット本文には表示しません。
+
+## 暗号化メモと秘密値
+
+個人情報、パスワード、API キー、他チャットに共有したいが平文 Markdown には置きたくない内容は、内部的に暗号化して `.local/vault/secrets.json.enc` に保存します。
+
+ユーザーは通常、鍵や保存形式を意識する必要はありません。Codex が必要に応じて `memory` や `secret` を使います。
+
+必要な場合だけ、手動でも操作できます。
 
 ```sh
 printf '%s' 'ここに個人情報を含む共有メモ' | codex-project memory set account
 codex-project memory list
 codex-project memory get account
 codex-project memory delete account
+```
+
+```sh
+printf '%s' 'example-value' | codex-project secret set api_token
+codex-project secret list
+codex-project secret get api_token
+codex-project secret delete api_token
 ```
 
 既存ファイルを暗号化メモへ取り込む場合:
@@ -101,24 +107,13 @@ codex-project memory import account .local/account-credentials.md
 
 取り込み後も元の平文ファイルは自動削除しません。内容を確認して、不要ならユーザーの明示指示で削除してください。
 
-## 秘密値
-
-API キーやパスワードのような単体の秘密値は `secret` に入れます。
-
-```sh
-printf '%s' 'example-value' | codex-project secret set api_token
-codex-project secret list
-codex-project secret get api_token
-codex-project secret delete api_token
-```
-
-`secret get` は値そのものを出力します。Codex は必要なときだけ使い、チャット本文には表示しないでください。
-
 ## project-local hooks
 
 `codex-project init` は、対象プロジェクト内の `.codex/` にだけ hooks を入れます。`~/.codex/config.toml` には触らないので、別プロジェクトには広がりません。
 
 hook は Codex の `UserPromptSubmit` で動き、各ターン前に共有状態を短く表示します。暗号化メモや秘密値の本文は表示しません。
+
+hook の状態確認や再導入が必要な場合だけ、次を使います。
 
 ```sh
 codex-project hooks status
