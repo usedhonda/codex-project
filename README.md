@@ -3,6 +3,7 @@
 Codex App で新しいプロジェクトを始めるときに、プロジェクト内だけで共有する記憶領域を作る初期化ツールです。
 
 `codex-project` は `.local/` を作り、後続チャットが読むべき `AGENTS.md` の管理ブロックを追加し、個人情報やパスワードを内部的に暗号化して保存できるようにします。
+さらに、そのプロジェクト内だけで動く Codex hooks を `.codex/` に入れ、各チャットが共有状態を見落としにくくします。
 
 ## インストール
 
@@ -40,9 +41,34 @@ $codex-project Next.js の SaaS。認証は Clerk。
 - `.local/index.md`: チャット一覧
 - `.local/chats/<chat-id>/`: チャットごとの作業ログ
 - `.local/vault/secrets.json.enc`: 暗号化された保存領域
+- `.codex/hooks.json`: このプロジェクト専用の Codex hook 設定
+- `.codex/hooks/codex-project-context-hook.mjs`: 各ターン前に共有状態を短く表示する hook
 - `AGENTS.md`: 後続チャットが `.local/` と暗号化メモを読むためのルール
 
 `.local/` は `.gitignore` に追加されます。すでに git が `.local/` を追跡している場合は、危険なので強めに停止します。
+
+## プロジェクト内 hooks
+
+`codex-project init` は、対象プロジェクト内の `.codex/` にだけ hooks を入れます。グローバル設定の `~/.codex/config.toml` には触りません。
+
+hook は Codex の `UserPromptSubmit` で動き、各ターン前に次のような短い共有状態だけを表示します。
+
+- `.local/` の場所
+- 平文共有ファイルの一覧
+- 暗号化メモ名
+- 秘密値名
+- handoff ファイルの有無
+- inbox がある場合の未読数
+
+暗号化メモや秘密値の本文は表示しません。
+
+```sh
+codex-project hooks status
+codex-project hooks install
+codex-project hooks remove
+```
+
+Codex が新しい hook を検出したときは、Codex 側の `/hooks` で信頼確認が必要になることがあります。
 
 ## 暗号化メモ
 
@@ -92,9 +118,16 @@ codex-project context
 codex-project memory get <name>
 ```
 
+hook からは短い表示だけを使います。
+
+```sh
+codex-project context --hook
+```
+
 ## 注意点
 
 - `.local/` はローカル専用です。git に入れません。
+- `.codex/` の hooks はこのプロジェクト専用です。別プロジェクトやグローバル設定には広がりません。
 - 個人情報、パスワード、API キー、公開したくない共有メモは平文 Markdown に書かず、`memory` または `secret` に入れてください。
 - 暗号化は、`.local/` だけが流出した場合や誤コミットを防ぐためのものです。
 - 同じ Mac の同じユーザー権限を完全に奪われた場合は、防御できません。

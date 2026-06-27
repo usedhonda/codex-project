@@ -10,6 +10,8 @@ const INIT_START = "<!-- CODEX-PROJECT-MEMORY -->";
 const INIT_END = "<!-- CODEX-PROJECT-MEMORY-END -->";
 const LEGACY_INIT_START = "<!-- INIT-CDXAPP -->";
 const LEGACY_INIT_END = "<!-- INIT-CDXAPP-END -->";
+const HOOK_SCRIPT_NAME = "codex-project-context-hook.mjs";
+const HOOK_COMMAND = `root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; node "$root/.codex/hooks/${HOOK_SCRIPT_NAME}" "$root"`;
 const VAULT_VERSION = 1;
 const ALGORITHM = "aes-256-gcm";
 
@@ -43,7 +45,12 @@ async function main() {
   }
 
   if (args[0] === "context") {
-    printContext(root);
+    printContext(root, { hook: args.includes("--hook") });
+    return;
+  }
+
+  if (args[0] === "hooks") {
+    handleHooksCommand(root, args.slice(1));
     return;
   }
 
@@ -63,6 +70,7 @@ function printHelp() {
   console.log(`Usage:
   ${COMMAND_NAME} init [initial project request]
   ${COMMAND_NAME} context
+  ${COMMAND_NAME} hooks <install|status|remove>
   ${COMMAND_NAME} memory <set|get|list|delete|import> [name] [file]
   ${COMMAND_NAME} secret <set|get|list|delete> [name]
   ${COMMAND_NAME} vault key <path|export>
@@ -88,6 +96,7 @@ async function initializeProject(root, initialRequest) {
   mkdir(chatDir, 0o700);
   mkdir(path.join(localDir, "vault"), 0o700);
   ensureVault(root);
+  installHooks(root);
 
   const scan = scanProject(root);
   const storedRequest = initialRequest
@@ -112,6 +121,7 @@ async function initializeProject(root, initialRequest) {
   console.log(`initialized: ${root}`);
   console.log(`chat_id: ${chatId}`);
   console.log(`local_memory: ${localDir}`);
+  console.log("project_hooks: installed");
   if (storedRequest.secretNames.length > 0) {
     console.log(`vaulted_initial_secrets: ${storedRequest.secretNames.join(", ")}`);
   }
@@ -210,6 +220,27 @@ async function handleMemoryCommand(root, args) {
   await handleEncryptedNoteCommand(root, args, "memory");
 }
 
+function handleHooksCommand(root, args) {
+  const action = args[0];
+  if (!["install", "status", "remove"].includes(action)) {
+    throw new Error(`usage: ${COMMAND_NAME} hooks <install|status|remove>`);
+  }
+
+  if (action === "install") {
+    installHooks(root);
+    console.log("project hooks installed");
+    return;
+  }
+
+  if (action === "status") {
+    printHooksStatus(root);
+    return;
+  }
+
+  removeHooks(root);
+  console.log("project hooks removed");
+}
+
 async function handleEncryptedNoteCommand(root, args, commandLabel) {
   const action = args[0];
   const name = args[1];
@@ -291,7 +322,7 @@ async function handleEncryptedNoteCommand(root, args, commandLabel) {
   }
 }
 
-function printContext(root) {
+function printContext(root, options = {}) {
   ensureVault(root);
   const localDir = path.join(root, ".local");
   const files = [
@@ -303,6 +334,10 @@ function printContext(root) {
   ].filter((file) => fs.existsSync(path.join(localDir, file)));
   const vault = readVault(root);
   normalizeVault(vault);
+  if (options.hook) {
+    printHookContext(root, localDir, files, vault);
+    return;
+  }
   console.log("# codex-project context");
   console.log("");
   console.log(`local_memory: ${localDir}`);
@@ -330,6 +365,159 @@ function printContext(root) {
   console.log("- Read the plain context files above.");
   console.log("- Use `codex-project memory get <name>` only for encrypted project notes needed for this task.");
   console.log("- Use `codex-project secret get <name>` only when the user request requires the secret value; do not print secret values in chat.");
+}
+
+function printHookContext(root, localDir, files, vault) {
+  const notes = Object.keys(vault.notes).sort();
+  const secrets = Object.keys(vault.secrets).sort();
+  const handoffPath = path.join(localDir, "handoff", "latest.md");
+  const inboxDir = path.join(localDir, "inbox");
+  const relativeLocal = path.relative(root, localDir) || ".local";
+
+  console.log("[codex-project context]");
+  console.log(`local_memory: ${relativeLocal}`);
+  if (files.length > 0) {
+    console.log(`plain_context_files: ${files.map((file) => `.local/${file}`).join(", ")}`);
+  }
+  console.log(`encrypted_notes: ${notes.length === 0 ? "none" : notes.join(", ")}`);
+  console.log(`secrets: ${secrets.length === 0 ? "none" : secrets.join(", ")}`);
+  if (fs.existsSync(handoffPath)) {
+    console.log("handoff: .local/handoff/latest.md");
+  }
+  if (fs.existsSync(inboxDir)) {
+    const pending = countFiles(path.join(inboxDir, "pending"));
+    console.log(`inbox_pending: ${pending}`);
+  }
+  console.log("read_more: codex-project context");
+}
+
+function installHooks(root) {
+  const codexDir = path.join(root, ".codex");
+  const hooksDir = path.join(codexDir, "hooks");
+  mkdir(codexDir, 0o755);
+  mkdir(hooksDir, 0o755);
+  ensureProjectConfig(path.join(codexDir, "config.toml"));
+  writeHookScript(path.join(hooksDir, HOOK_SCRIPT_NAME));
+  upsertHooksJson(path.join(codexDir, "hooks.json"));
+}
+
+function printHooksStatus(root) {
+  const hooksPath = path.join(root, ".codex", "hooks.json");
+  const scriptPath = path.join(root, ".codex", "hooks", HOOK_SCRIPT_NAME);
+  const installed = hookEntryExists(hooksPath) && fs.existsSync(scriptPath);
+  console.log(`project_hooks: ${installed ? "installed" : "not_installed"}`);
+  console.log(`hooks_json: ${path.relative(root, hooksPath)}`);
+  console.log(`hook_script: ${path.relative(root, scriptPath)}`);
+}
+
+function removeHooks(root) {
+  const hooksPath = path.join(root, ".codex", "hooks.json");
+  if (fs.existsSync(hooksPath)) {
+    const hooksJson = readHooksJson(hooksPath);
+    const groups = hooksJson.hooks?.UserPromptSubmit || [];
+    const nextGroups = groups
+      .map((group) => ({
+        ...group,
+        hooks: (group.hooks || []).filter((hook) => hook.command !== HOOK_COMMAND),
+      }))
+      .filter((group) => group.hooks.length > 0);
+    if (!hooksJson.hooks) {
+      hooksJson.hooks = {};
+    }
+    if (nextGroups.length > 0) {
+      hooksJson.hooks.UserPromptSubmit = nextGroups;
+    } else {
+      delete hooksJson.hooks.UserPromptSubmit;
+    }
+    fs.writeFileSync(hooksPath, `${JSON.stringify(hooksJson, null, 2)}\n`, { mode: 0o644 });
+  }
+
+  const scriptPath = path.join(root, ".codex", "hooks", HOOK_SCRIPT_NAME);
+  if (fs.existsSync(scriptPath) && fs.readFileSync(scriptPath, "utf8") === hookScriptTemplate()) {
+    fs.unlinkSync(scriptPath);
+  }
+}
+
+function ensureProjectConfig(configPath) {
+  if (fs.existsSync(configPath)) {
+    return;
+  }
+  fs.writeFileSync(
+    configPath,
+    [
+      "# codex-project project-local configuration",
+      "",
+      "[features]",
+      "hooks = true",
+      "",
+    ].join("\n"),
+    { mode: 0o644 },
+  );
+}
+
+function writeHookScript(scriptPath) {
+  fs.writeFileSync(scriptPath, hookScriptTemplate(), { mode: 0o755 });
+  fs.chmodSync(scriptPath, 0o755);
+}
+
+function upsertHooksJson(hooksPath) {
+  const hooksJson = readHooksJson(hooksPath);
+  if (!hooksJson.hooks) {
+    hooksJson.hooks = {};
+  }
+  const groups = hooksJson.hooks.UserPromptSubmit || [];
+  if (!groups.some((group) => (group.hooks || []).some((hook) => hook.command === HOOK_COMMAND))) {
+    groups.push({
+      hooks: [
+        {
+          type: "command",
+          command: HOOK_COMMAND,
+          timeout: 5,
+          statusMessage: "Reading codex-project memory",
+        },
+      ],
+    });
+  }
+  hooksJson.hooks.UserPromptSubmit = groups;
+  fs.writeFileSync(hooksPath, `${JSON.stringify(hooksJson, null, 2)}\n`, { mode: 0o644 });
+}
+
+function readHooksJson(hooksPath) {
+  if (!fs.existsSync(hooksPath)) {
+    return { hooks: {} };
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(hooksPath, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : { hooks: {} };
+  } catch (error) {
+    throw new Error(`cannot parse ${hooksPath}: ${error.message}`);
+  }
+}
+
+function hookEntryExists(hooksPath) {
+  if (!fs.existsSync(hooksPath)) {
+    return false;
+  }
+  const hooksJson = readHooksJson(hooksPath);
+  return (hooksJson.hooks?.UserPromptSubmit || []).some((group) =>
+    (group.hooks || []).some((hook) => hook.command === HOOK_COMMAND),
+  );
+}
+
+function hookScriptTemplate() {
+  return `#!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+
+const root = process.argv[2] || process.cwd();
+const result = spawnSync("codex-project", ["context", "--hook"], {
+  cwd: root,
+  encoding: "utf8",
+});
+
+if (result.status === 0 && result.stdout) {
+  process.stdout.write(result.stdout);
+}
+`;
 }
 
 function ensureLocalNotTracked(root) {
@@ -391,6 +579,7 @@ function agentsBlock() {
 - Never commit, upload, paste, or externally transmit \`.local/\` contents unless the user explicitly asks for a specific item.
 - At the start of each chat, read these files when present: \`.local/project.md\`, \`.local/state.md\`, \`.local/decisions.md\`, and \`.local/index.md\`.
 - At the start of each chat, also run \`codex-project context\` to list encrypted vault notes and secret names without exposing secret values.
+- Project-local Codex hooks are installed under \`.codex/\` by default. They run \`codex-project context --hook\` before user prompts so chats can notice shared state, future inbox entries, and handoff files without exposing secret values.
 - Encrypted project notes are readable with \`codex-project memory get <name>\`. Read only notes relevant to the current task, and do not paste sensitive content into chat unless explicitly needed.
 - Use \`CODEX_THREAD_ID\` as this chat's id when available. If it is absent, use a generated \`YYYYMMDD-HHMMSS-<random>\` id and note that same-chat identity is not guaranteed.
 - Keep chat-local notes under \`.local/chats/<chat-id>/\`: \`session.md\`, \`actions.md\`, and \`conversation.md\`.
@@ -873,6 +1062,13 @@ function readTextIfExists(filePath) {
     return "";
   }
   return fs.readFileSync(filePath, "utf8");
+}
+
+function countFiles(dir) {
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+    return 0;
+  }
+  return fs.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile()).length;
 }
 
 function formatDateForId(date) {

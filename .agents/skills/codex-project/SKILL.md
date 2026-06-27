@@ -28,10 +28,25 @@ codex-project init
 
 - `.local/` のパス
 - chat id
+- project-local hooks を入れたか
 - 初期指示内の秘密らしき値を内部暗号化領域へ移したか
 - hard stop または conflict があったか
 
 秘密値そのものは表示しない。
+
+## hooks
+
+`codex-project init` は、このプロジェクト内だけで動く Codex hooks を `.codex/` に作る。
+
+hook は `codex-project context --hook` を呼び、各ターン前に共有状態を短く表示する。暗号化メモや秘密値の本文は表示しない。
+
+管理コマンド:
+
+```sh
+codex-project hooks <install|status|remove>
+```
+
+Codex が hook の信頼確認を求めた場合は、hook が project-local であることと、秘密本文を出さないことを確認してから進める。
 
 ## 暗号化メモ
 
@@ -65,6 +80,12 @@ codex-project context
 
 ```sh
 codex-project memory get <name>
+```
+
+hook用の短い表示:
+
+```sh
+codex-project context --hook
 ```
 
 ## 安全ルール

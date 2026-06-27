@@ -28,6 +28,7 @@ function testHelpDoesNotInit() {
 
   const help = run(project, home, ["--help"]);
   assert.match(help, /codex-project init/);
+  assert.match(help, /codex-project hooks/);
   assert.equal(fs.existsSync(path.join(project, ".local")), false);
 
   const unknown = runRaw(project, home, ["--not-a-real-option"]);
@@ -49,6 +50,9 @@ function testFreshInitAndVault() {
   assert.equal(initOutput.includes("vault_key"), false);
 
   assert.ok(fs.existsSync(path.join(project, ".local", "project.md")));
+  assert.ok(fs.existsSync(path.join(project, ".codex", "config.toml")));
+  assert.ok(fs.existsSync(path.join(project, ".codex", "hooks.json")));
+  assert.ok(fs.existsSync(path.join(project, ".codex", "hooks", "codex-project-context-hook.mjs")));
   assert.ok(fs.existsSync(path.join(project, ".local", "chats", "thread-smoke-001", "initial-request.md")));
   assert.ok(fs.existsSync(path.join(project, ".local", "vault", "secrets.json.enc")));
   assert.match(fs.readFileSync(path.join(project, ".gitignore"), "utf8"), /^\.local\/$/m);
@@ -76,7 +80,22 @@ function testFreshInitAndVault() {
   assert.match(context, /- account/);
   assert.equal(context.includes("sensitive shared note"), false);
   assert.equal(run(project, home, ["memory", "get", "account"]), "sensitive shared note");
-  const searchableAfterMemory = collectText(project, [".local", "AGENTS.md", ".gitignore"]);
+  fs.mkdirSync(path.join(project, ".local", "inbox", "pending"), { recursive: true });
+  fs.writeFileSync(path.join(project, ".local", "inbox", "pending", "001.md"), "Read README later\n");
+  const hookContext = run(project, home, ["context", "--hook"]);
+  assert.match(hookContext, /^\[codex-project context\]/m);
+  assert.match(hookContext, /encrypted_notes: account/);
+  assert.match(hookContext, /secrets: initial_api_key/);
+  assert.match(hookContext, /inbox_pending: 1/);
+  assert.equal(hookContext.includes("sensitive shared note"), false);
+  assert.equal(hookContext.includes("abc123"), false);
+  const hooksStatus = run(project, home, ["hooks", "status"]);
+  assert.match(hooksStatus, /project_hooks: installed/);
+  run(project, home, ["hooks", "remove"]);
+  const hooksStatusAfterRemove = run(project, home, ["hooks", "status"]);
+  assert.match(hooksStatusAfterRemove, /project_hooks: not_installed/);
+  run(project, home, ["hooks", "install"]);
+  const searchableAfterMemory = collectText(project, [".local", ".codex", "AGENTS.md", ".gitignore"]);
   assert.equal(searchableAfterMemory.includes("sensitive shared note"), false);
 
   const keyPath = run(project, home, ["vault", "key", "path"]).trim();
