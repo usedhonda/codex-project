@@ -1,55 +1,75 @@
 ---
 name: init-codex-project
-description: Initialize a Codex App project with private .local memory, per-chat logs, AGENTS.md guidance, and an encrypted local secret vault. Use when the user asks for init-codex-project, project bootstrap, .local project memory, or Codex App project initialization.
-argument-hint: "[initial project request]"
+description: Codex App プロジェクトを初期化し、.local の共有メモリ、チャット別ログ、AGENTS.md ルール、内部暗号化メモリを作る。init-codex-project、project bootstrap、.local project memory、Codex App project initialization の依頼で使う。
+argument-hint: "[初期プロジェクト指示]"
 ---
 
 # init-codex-project
 
-Run the `init-codex-project` CLI from the current project directory.
+現在のプロジェクトディレクトリで `init-codex-project` CLI を実行する。
 
-If the user provides text after invoking this skill, treat it as the initial
-project request and pass it to the CLI as one argument. Do not summarize it
-away before execution.
+ユーザーが skill 呼び出しの後に自由テキストを書いた場合、それは初期プロジェクト指示として扱い、要約せず1つの引数として CLI に渡す。
 
-## Initialize
+## 初期化
 
-Use this command from the current working directory:
+引数がある場合:
 
 ```sh
 init-codex-project "$ARGUMENTS"
 ```
 
-If there are no arguments, run:
+引数がない場合:
 
 ```sh
 init-codex-project
 ```
 
-After the command finishes, report:
+完了後は以下だけを報告する:
 
-- the `.local/` path
-- the chat id
-- whether initial secrets were moved into the encrypted vault
-- any hard stop or conflict file created
+- `.local/` のパス
+- chat id
+- 初期指示内の秘密らしき値を内部暗号化領域へ移したか
+- hard stop または conflict があったか
 
-Do not print secret values.
+秘密値そのものは表示しない。
 
-## Secret Management
+## 暗号化メモ
 
-Use these commands when the user asks to manage the vault:
+他チャットに読ませたいが、平文 Markdown に置きたくない共有情報は `memory` を使う。
+
+```sh
+init-codex-project memory <set|get|list|delete|import>
+```
+
+`memory set` は標準入力で本文を渡す。`memory import` はプロジェクト内ファイルを暗号化メモへ取り込む。取り込み元の平文ファイルは自動削除しない。
+
+## 秘密値
+
+API キーやパスワードのような単体の秘密値は `secret` を使う。
 
 ```sh
 init-codex-project secret <set|get|list|delete>
-init-codex-project vault key <path|export>
-init-codex-project vault reset --yes
 ```
 
-For `secret set`, pass the secret value on stdin and do not echo it in chat.
+`secret set` は標準入力で値を渡す。`secret get` の出力は必要な処理だけに使い、チャット本文へ表示しない。
 
-## Safety Rules
+## 後続チャットの読み込み
 
-- Treat `.local/` as private local state that may contain personal information.
-- Do not commit, paste, or externally transmit `.local/`.
-- If `init-codex-project` stops because `.local/` is already tracked by git, stop and report the exact blocker.
-- If the vault key is missing, do not create workaround plaintext files. Report that old ciphertext is unrecoverable without the key, then use `vault reset --yes` only when the user asks for reset.
+作業開始時は以下を実行して、平文共有ファイル、暗号化メモ名、秘密値名を確認する。
+
+```sh
+init-codex-project context
+```
+
+必要な暗号化メモだけ読む。
+
+```sh
+init-codex-project memory get <name>
+```
+
+## 安全ルール
+
+- `.local/` は個人情報を含みうるローカル専用領域として扱う。
+- `.local/` を commit、外部送信、貼り付けしない。
+- `.local/` が git tracked で停止した場合は、その blocker をそのまま報告する。
+- 暗号化領域が開けない場合、平文 workaround を作らない。復旧不能または reset が必要な状態として報告する。

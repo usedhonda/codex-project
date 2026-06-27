@@ -1,82 +1,108 @@
 # init-codex-project
 
-Project-local initializer for Codex App workspaces.
+Codex App で新しいプロジェクトを始めるときに、プロジェクト内だけで共有する記憶領域を作る初期化ツールです。
 
-`init-codex-project` creates a private `.local/` memory area, updates the target
-project's `AGENTS.md` with the shared operating contract, and provides an
-encrypted local vault for secrets.
+`init-codex-project` は `.local/` を作り、後続チャットが読むべき `AGENTS.md` の管理ブロックを追加し、個人情報やパスワードを内部的に暗号化して保存できるようにします。
 
-## Install
-
-Clone the repository and link the CLI locally:
+## インストール
 
 ```sh
 git clone https://github.com/usedhonda/init-codex-project.git
 cd init-codex-project
 npm link
+npm run install-skill
 ```
 
-## Usage
+`npm link` で `init-codex-project` コマンドを使えるようにします。
+`npm run install-skill` で Codex App から `$init-codex-project` として呼べるようにします。
 
-From the project you want to initialize:
+## 使い方
+
+対象プロジェクトのフォルダで実行します。
 
 ```sh
 init-codex-project
-init-codex-project "Build a Next.js app. Use Clerk for auth."
+init-codex-project "Next.js の SaaS。認証は Clerk。"
 ```
 
-Secret vault commands:
+Codex App では skill として呼びます。
+
+```text
+$init-codex-project
+$init-codex-project Next.js の SaaS。認証は Clerk。
+```
+
+## 何が作られるか
+
+- `.local/project.md`: プロジェクトの目的や初期情報
+- `.local/state.md`: 現在の状態
+- `.local/decisions.md`: 決定事項
+- `.local/index.md`: チャット一覧
+- `.local/chats/<chat-id>/`: チャットごとの作業ログ
+- `.local/vault/secrets.json.enc`: 暗号化された保存領域
+- `AGENTS.md`: 後続チャットが `.local/` と暗号化メモを読むためのルール
+
+`.local/` は `.gitignore` に追加されます。すでに git が `.local/` を追跡している場合は、危険なので強めに停止します。
+
+## 暗号化メモ
+
+ユーザーは鍵を意識する必要はありません。内部的に暗号化の準備を行い、`.local/vault/secrets.json.enc` に保存します。
+
+他のチャットに読ませたいが、平文 Markdown には置きたくない内容は `memory` に入れます。
+
+```sh
+printf '%s' 'ここに個人情報を含む共有メモ' | init-codex-project memory set account
+init-codex-project memory list
+init-codex-project memory get account
+init-codex-project memory delete account
+```
+
+既存ファイルを暗号化メモへ取り込む場合:
+
+```sh
+init-codex-project memory import account .local/account-credentials.md
+```
+
+取り込み後も元の平文ファイルは自動削除しません。内容を確認して、不要ならユーザーの明示指示で削除してください。
+
+## 秘密値
+
+API キーやパスワードのような単体の秘密値は `secret` に入れます。
 
 ```sh
 printf '%s' 'example-value' | init-codex-project secret set api_token
 init-codex-project secret list
 init-codex-project secret get api_token
 init-codex-project secret delete api_token
-init-codex-project vault key path
-init-codex-project vault key export
-init-codex-project vault reset --yes
 ```
 
-## Storage Model
+`secret get` は値そのものを出力します。Codex は必要なときだけ使い、チャット本文には表示しないでください。
 
-- `.local/` is added to `.gitignore`.
-- If git already tracks `.local/`, initialization stops hard.
-- Shared project memory lives in `.local/*.md`.
-- Per-chat logs live in `.local/chats/<chat-id>/`.
-- Secrets live encrypted in `.local/vault/secrets.json.enc`.
-- The vault key lives outside the project at
-  `~/.codex/init-codex-project/keys/<project-id>.key`.
+## 後続チャットでの読み方
 
-Losing the key makes the old vault unrecoverable. Use `vault key export` and
-store the output in a password manager or other trusted backup.
-
-## Codex App Skill
-
-Codex App does not support adding arbitrary raw slash commands such as
-`/init-codex-project` from `~/.codex/prompts`. Use the packaged skill instead.
-
-For repo-local use, keep `.agents/skills/init-codex-project/SKILL.md` in the
-repository and invoke it as:
-
-```text
-$init-codex-project
-$init-codex-project Build a Next.js app. Use Clerk for auth.
-```
-
-For personal use across projects, copy or symlink the skill directory to:
+`AGENTS.md` の管理ブロックにより、後続チャットは開始時に以下を行います。
 
 ```sh
-~/.agents/skills/init-codex-project
+init-codex-project context
 ```
 
-Codex detects skill changes automatically in many cases. If the skill does not
-appear, restart Codex or open a new chat.
+これで平文の共有ファイル、暗号化メモ名、秘密値名だけを一覧できます。暗号化メモの本文が必要な場合だけ、次を使います。
 
-## Safety Notes
+```sh
+init-codex-project memory get <name>
+```
 
-- `.local/` is private local state and is never intended for git.
-- Secrets should go into the vault, not plain Markdown logs.
-- The vault primarily protects against accidental repository sharing or
-  `.local/` leakage without the external key file.
-- If both `.local/vault/secrets.json.enc` and the key file are copied together,
-  the vault can be decrypted by whoever has both files.
+## 注意点
+
+- `.local/` はローカル専用です。git に入れません。
+- 個人情報、パスワード、API キー、公開したくない共有メモは平文 Markdown に書かず、`memory` または `secret` に入れてください。
+- 暗号化は、`.local/` だけが流出した場合や誤コミットを防ぐためのものです。
+- 同じ Mac の同じユーザー権限を完全に奪われた場合は、防御できません。
+- 暗号化データは同じ環境で読む前提です。マシン移行時は別途エクスポートまたは移行が必要です。
+
+## 開発
+
+```sh
+npm run check
+npm test
+```

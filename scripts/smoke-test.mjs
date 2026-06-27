@@ -26,9 +26,10 @@ function testFreshInitAndVault() {
   fs.mkdirSync(project, { recursive: true });
   fs.writeFileSync(path.join(project, "README.md"), "# Demo\n");
 
-  run(project, home, ["Demo app. api_key=abc123"], {
+  const initOutput = run(project, home, ["Demo app. api_key=abc123"], {
     CODEX_THREAD_ID: "thread-smoke-001",
   });
+  assert.equal(initOutput.includes("vault_key"), false);
 
   assert.ok(fs.existsSync(path.join(project, ".local", "project.md")));
   assert.ok(fs.existsSync(path.join(project, ".local", "chats", "thread-smoke-001", "initial-request.md")));
@@ -48,6 +49,18 @@ function testFreshInitAndVault() {
   const searchable = collectText(project, [".local", "AGENTS.md", ".gitignore"]);
   assert.equal(searchable.includes("abc123"), false);
   assert.equal(searchable.includes("dummy-secret-value"), false);
+
+  run(project, home, ["memory", "set", "account"], {}, "sensitive shared note");
+  const memoryList = run(project, home, ["memory", "list"]);
+  assert.match(memoryList, /^account$/m);
+  const context = run(project, home, ["context"]);
+  assert.equal(context.includes("vault_key"), false);
+  assert.match(context, /encrypted_notes:/);
+  assert.match(context, /- account/);
+  assert.equal(context.includes("sensitive shared note"), false);
+  assert.equal(run(project, home, ["memory", "get", "account"]), "sensitive shared note");
+  const searchableAfterMemory = collectText(project, [".local", "AGENTS.md", ".gitignore"]);
+  assert.equal(searchableAfterMemory.includes("sensitive shared note"), false);
 
   const keyPath = run(project, home, ["vault", "key", "path"]).trim();
   assert.ok(fs.existsSync(keyPath));
@@ -83,7 +96,7 @@ function testMissingKeyAndReset() {
 
   const missing = runRaw(project, home, ["secret", "list"]);
   assert.notEqual(missing.status, 0);
-  assert.match(missing.stderr, /vault key is missing/);
+  assert.match(missing.stderr, /encrypted storage cannot be opened/);
   assert.match(missing.stderr, /vault reset --yes/);
 
   run(project, home, ["vault", "reset", "--yes"]);

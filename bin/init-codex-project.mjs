@@ -24,8 +24,18 @@ async function main() {
     return;
   }
 
+  if (args[0] === "memory") {
+    await handleMemoryCommand(root, args.slice(1));
+    return;
+  }
+
   if (args[0] === "vault") {
     await handleVaultCommand(root, args.slice(1));
+    return;
+  }
+
+  if (args[0] === "context") {
+    printContext(root);
     return;
   }
 
@@ -71,7 +81,6 @@ async function initializeProject(root, initialRequest) {
   console.log(`initialized: ${root}`);
   console.log(`chat_id: ${chatId}`);
   console.log(`local_memory: ${localDir}`);
-  console.log(`vault_key: ${getKeyPath(project.projectId)}`);
   if (storedRequest.secretNames.length > 0) {
     console.log(`vaulted_initial_secrets: ${storedRequest.secretNames.join(", ")}`);
   }
@@ -138,6 +147,11 @@ async function handleVaultCommand(root, args) {
   const [subject, action, flag] = args;
   const project = getProjectInfo(root);
 
+  if (subject === "note") {
+    await handleEncryptedNoteCommand(root, args.slice(1), "vault note");
+    return;
+  }
+
   if (subject === "key" && action === "path") {
     console.log(getKeyPath(project.projectId));
     return;
@@ -158,7 +172,133 @@ async function handleVaultCommand(root, args) {
     return;
   }
 
-  throw new Error("usage: init-codex-project vault key <path|export> | vault reset --yes");
+  throw new Error("usage: init-codex-project vault key <path|export> | vault note <set|get|list|delete|import> | vault reset --yes");
+}
+
+async function handleMemoryCommand(root, args) {
+  await handleEncryptedNoteCommand(root, args, "memory");
+}
+
+async function handleEncryptedNoteCommand(root, args, commandLabel) {
+  const action = args[0];
+  const name = args[1];
+
+  if (!["set", "get", "list", "delete", "import"].includes(action)) {
+    throw new Error(`usage: init-codex-project ${commandLabel} <set|get|list|delete|import> [name] [file]`);
+  }
+
+  ensureLocalNotTracked(root);
+  ensureGitignore(root);
+  ensureVault(root);
+
+  const vault = readVault(root);
+  normalizeVault(vault);
+
+  if (action === "list") {
+    Object.keys(vault.notes).sort().forEach((key) => console.log(key));
+    return;
+  }
+
+  if (!name) {
+    throw new Error(`usage: init-codex-project ${commandLabel} ${action} <name>`);
+  }
+  validateSecretName(name);
+
+  if (action === "set") {
+    const value = await readStdin();
+    if (value.length === 0) {
+      throw new Error(`${commandLabel} set requires text on stdin`);
+    }
+    vault.notes[name] = {
+      text: value,
+      updatedAt: new Date().toISOString(),
+      source: "stdin",
+    };
+    writeVault(root, vault);
+    console.log(`encrypted memory saved: ${name}`);
+    return;
+  }
+
+  if (action === "import") {
+    const fileArg = args[2];
+    if (!fileArg) {
+      throw new Error(`usage: init-codex-project ${commandLabel} import <name> <file>`);
+    }
+    const filePath = path.resolve(root, fileArg);
+    if (!filePath.startsWith(`${root}${path.sep}`)) {
+      throw new Error("vault note import only accepts files inside the current project");
+    }
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      throw new Error(`file not found: ${fileArg}`);
+    }
+    vault.notes[name] = {
+      text: fs.readFileSync(filePath, "utf8"),
+      updatedAt: new Date().toISOString(),
+      source: path.relative(root, filePath),
+    };
+    writeVault(root, vault);
+    console.log(`encrypted memory imported: ${name}`);
+    console.log(`source_plaintext_still_exists: ${path.relative(root, filePath)}`);
+    return;
+  }
+
+  if (action === "get") {
+    if (!Object.hasOwn(vault.notes, name)) {
+      throw new Error(`encrypted memory not found: ${name}`);
+    }
+    process.stdout.write(vault.notes[name].text);
+    return;
+  }
+
+  if (action === "delete") {
+    if (!Object.hasOwn(vault.notes, name)) {
+      throw new Error(`encrypted memory not found: ${name}`);
+    }
+    delete vault.notes[name];
+    writeVault(root, vault);
+    console.log(`encrypted memory deleted: ${name}`);
+  }
+}
+
+function printContext(root) {
+  ensureVault(root);
+  const localDir = path.join(root, ".local");
+  const files = [
+    "project.md",
+    "state.md",
+    "decisions.md",
+    "index.md",
+    "conflicts.md",
+  ].filter((file) => fs.existsSync(path.join(localDir, file)));
+  const vault = readVault(root);
+  normalizeVault(vault);
+  console.log("# init-codex-project context");
+  console.log("");
+  console.log(`local_memory: ${localDir}`);
+  console.log("");
+  console.log("plain_context_files:");
+  files.forEach((file) => console.log(`- .local/${file}`));
+  console.log("");
+  console.log("encrypted_notes:");
+  const notes = Object.keys(vault.notes).sort();
+  if (notes.length === 0) {
+    console.log("- none");
+  } else {
+    notes.forEach((name) => console.log(`- ${name}`));
+  }
+  console.log("");
+  console.log("secrets:");
+  const secrets = Object.keys(vault.secrets).sort();
+  if (secrets.length === 0) {
+    console.log("- none");
+  } else {
+    secrets.forEach((name) => console.log(`- ${name}`));
+  }
+  console.log("");
+  console.log("next_steps:");
+  console.log("- Read the plain context files above.");
+  console.log("- Use `init-codex-project memory get <name>` only for encrypted project notes needed for this task.");
+  console.log("- Use `init-codex-project secret get <name>` only when the user request requires the secret value; do not print secret values in chat.");
 }
 
 function ensureLocalNotTracked(root) {
@@ -208,13 +348,15 @@ function agentsBlock() {
 - Treat \`.local/\` as private, project-local memory. It may contain personal data, credentials, and sensitive operational notes.
 - Never commit, upload, paste, or externally transmit \`.local/\` contents unless the user explicitly asks for a specific item.
 - At the start of each chat, read these files when present: \`.local/project.md\`, \`.local/state.md\`, \`.local/decisions.md\`, and \`.local/index.md\`.
+- At the start of each chat, also run \`init-codex-project context\` to list encrypted vault notes and secret names without exposing secret values.
+- Encrypted project notes are readable with \`init-codex-project memory get <name>\`. Read only notes relevant to the current task, and do not paste sensitive content into chat unless explicitly needed.
 - Use \`CODEX_THREAD_ID\` as this chat's id when available. If it is absent, use a generated \`YYYYMMDD-HHMMSS-<random>\` id and note that same-chat identity is not guaranteed.
 - Keep chat-local notes under \`.local/chats/<chat-id>/\`: \`session.md\`, \`actions.md\`, and \`conversation.md\`.
 - Log meaningful work in \`.local/chats/<chat-id>/actions.md\`. Log important user instructions, decisions, and handoff context in \`conversation.md\`.
 - Keep shared current state in \`.local/state.md\`; keep durable project decisions in \`.local/decisions.md\`.
-- Store passwords, API keys, tokens, and personal secrets only through the encrypted vault. Do not write secret values into plain Markdown logs.
-- The vault ciphertext is \`.local/vault/secrets.json.enc\`; the project key lives outside the repo under \`~/.codex/init-codex-project/keys/\`.
-- If the vault key is lost, old ciphertext is unrecoverable. Reset by creating a new vault and re-registering secrets from their original sources.
+- Store passwords, API keys, tokens, personal secrets, and sensitive project notes only through the encrypted store. Do not write secret values into plain Markdown logs.
+- Encryption keys are managed internally by init-codex-project. The user normally should not need to handle them.
+- If encrypted storage cannot be opened, report the blocker and use reset only when the user explicitly asks.
 - When \`$init-codex-project <free text>\` or \`init-codex-project <free text>\` is used, treat the free text as a user request, not a casual note. Preserve intent, but record conflicts with repo facts in \`.local/conflicts.md\` instead of silently overwriting reality.
 ${INIT_END}`;
 }
@@ -335,7 +477,7 @@ function decisionsTemplate(now) {
     "# Decisions",
     "",
     `- ${now.toISOString()}: Use .local/ as private project memory; keep it out of git.`,
-    `- ${now.toISOString()}: Use encrypted vault storage for secrets, with keys under ~/.codex/init-codex-project/keys/.`,
+    `- ${now.toISOString()}: Use init-codex-project encrypted storage for secrets and sensitive project notes.`,
     "",
   ].join("\n");
 }
@@ -467,7 +609,7 @@ function ensureVault(root) {
   mkdir(path.dirname(vaultPath), 0o700);
   if (!fs.existsSync(vaultPath)) {
     readOrCreateProjectKey(getProjectInfo(root).projectId);
-    writeVault(root, { version: VAULT_VERSION, secrets: {} });
+    writeVault(root, createEmptyVault());
     return;
   }
   readProjectKey(getProjectInfo(root).projectId);
@@ -478,8 +620,8 @@ function readProjectKey(projectId) {
   if (!fs.existsSync(keyPath)) {
     throw new Error(
       [
-        `vault key is missing: ${keyPath}`,
-        "Existing vault ciphertext cannot be decrypted without this key.",
+        "encrypted storage cannot be opened because its internal key is missing.",
+        "Existing encrypted data cannot be decrypted without that key.",
         "Restore the key from backup, or run: init-codex-project vault reset --yes",
       ].join("\n"),
     );
@@ -490,7 +632,7 @@ function readProjectKey(projectId) {
 function readVault(root) {
   const vaultPath = getVaultPath(root);
   if (!fs.existsSync(vaultPath)) {
-    return { version: VAULT_VERSION, secrets: {} };
+    return createEmptyVault();
   }
   const envelope = JSON.parse(fs.readFileSync(vaultPath, "utf8"));
   if (envelope.version !== VAULT_VERSION || envelope.algorithm !== ALGORITHM) {
@@ -507,7 +649,9 @@ function readVault(root) {
     decipher.update(Buffer.from(envelope.ciphertext, "base64")),
     decipher.final(),
   ]);
-  return JSON.parse(plaintext.toString("utf8"));
+  const vault = JSON.parse(plaintext.toString("utf8"));
+  normalizeVault(vault);
+  return vault;
 }
 
 function writeVault(root, vault) {
@@ -544,7 +688,21 @@ function resetVault(root) {
     fs.renameSync(keyPath, `${keyPath}.lost-${formatDateForId(new Date())}`);
   }
   readOrCreateProjectKey(getProjectInfo(root).projectId);
-  writeVault(root, { version: VAULT_VERSION, secrets: {} });
+  writeVault(root, createEmptyVault());
+}
+
+function createEmptyVault() {
+  return { version: VAULT_VERSION, secrets: {}, notes: {} };
+}
+
+function normalizeVault(vault) {
+  if (!vault.secrets) {
+    vault.secrets = {};
+  }
+  if (!vault.notes) {
+    vault.notes = {};
+  }
+  return vault;
 }
 
 function readOrCreateProjectKey(projectId) {
