@@ -905,7 +905,8 @@ function agentsBlock() {
 - Keep chat-local notes under \`.local/chats/<chat-id>/\`: \`session.md\`, \`actions.md\`, and \`conversation.md\`.
 - Log meaningful work in \`.local/chats/<chat-id>/actions.md\`. Log important user instructions, decisions, and handoff context in \`conversation.md\`.
 - Keep shared current state in \`.local/state.md\`; keep durable project decisions in \`.local/decisions.md\`.
-- Store passwords, API keys, tokens, personal secrets, and sensitive project notes only through the encrypted store. Do not write secret values into plain Markdown logs.
+- If the user provides passwords, API keys, tokens, personal secrets, or sensitive project notes in chat, store them through \`codex-project secret set\` or \`codex-project memory set\` yourself. Do not ask the user to run storage commands.
+- Do not write secret values into plain Markdown logs. Record only the encrypted memory name, secret name, or a redacted reference.
 - Encryption keys are managed internally by codex-project. The user normally should not need to handle them.
 - If encrypted storage cannot be opened, report the blocker and use reset only when the user explicitly asks.
 - When \`$codex-project <free text>\`, \`codex-project init <free text>\`, or \`codex-project <free text>\` is used, treat the free text as a user request, not a casual note. Preserve intent, but record conflicts with repo facts in \`.local/conflicts.md\` instead of silently overwriting reality.

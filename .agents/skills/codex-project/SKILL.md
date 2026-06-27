@@ -50,23 +50,23 @@ Codex が hook の信頼確認を求めた場合は、hook が project-local で
 
 ## 暗号化メモ
 
-他チャットに読ませたいが、平文 Markdown に置きたくない共有情報は `memory` を使う。
+ユーザーが他チャットに読ませたいが、平文 Markdown に置きたくない共有情報を伝えた場合は、Codex が `memory` を使う。
 
 ```sh
 codex-project memory <set|get|list|delete|import>
 ```
 
-`memory set` は標準入力で本文を渡す。`memory import` はプロジェクト内ファイルを暗号化メモへ取り込む。取り込み元の平文ファイルは自動削除しない。
+`memory set` は標準入力で本文を渡す。`memory import` はプロジェクト内ファイルを暗号化メモへ取り込む。取り込み元の平文ファイルは自動削除しない。ユーザーに保存作業を依頼せず、Codex が必要に応じて実行する。
 
 ## 秘密値
 
-API キーやパスワードのような単体の秘密値は `secret` を使う。
+ユーザーが API キーやパスワードのような単体の秘密値を伝えた場合は、Codex が `secret` を使う。
 
 ```sh
 codex-project secret <set|get|list|delete>
 ```
 
-`secret set` は標準入力で値を渡す。`secret get` の出力は必要な処理だけに使い、チャット本文へ表示しない。
+`secret set` は標準入力で値を渡す。`secret get` の出力は必要な処理だけに使い、チャット本文へ表示しない。平文ログには秘密値そのものではなく、保存名や参照だけを書く。
 
 ## 後続チャットの読み込み
 
