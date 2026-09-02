@@ -1,11 +1,15 @@
 ---
 name: codex-project
-description: Codex App の同じプロジェクト内にある複数チャットへ、.local の共有メモリ、チャット別ログ、AGENTS.md ルール、内部暗号化メモリ、project-local hooks、プロジェクト内学習メモを追加する。Codex Project、codex-project、project memory、共有記憶の依頼で使う。
+description: ChatGPT デスクトップアプリのローカルプロジェクトへ、.local の明示的な状態・決定・引き継ぎ台帳、チャット別ログ、AGENTS.md ルール、内部暗号化メモリ、project-local hooks、プロジェクト内学習メモを追加する。Codex Project、codex-project、project memory、共有記憶の依頼で使う。
 ---
 
 # codex-project
 
 現在のプロジェクトディレクトリで `codex-project` CLI を実行する。
+
+ChatGPT デスクトップアプリには、クラウドの ChatGPT Projects と、コンピューター上のフォルダに接続するローカルプロジェクトがある。この skill と CLI が対象にするのはローカルプロジェクトだけであり、クラウドの ChatGPT Projects やそのファイルへ直接アクセスするものではない。
+
+組み込みローカルメモリは、過去のチャットから有用な文脈をバックグラウンドで生成して思い出す非同期・確率的な補助であり、生成や再現は保証されない。必ず適用するルールは `AGENTS.md`、明示的に読み戻す状態・決定・引き継ぎ・チャット別ログ・暗号化 vault は `codex-project`、柔軟な想起は組み込みローカルメモリとして扱う。互いを代替するものではない。
 
 ユーザーが skill 呼び出しの後に自由テキストを書いた場合、それは初期プロジェクト指示として扱い、要約せず1つの引数として CLI に渡す。
 
@@ -38,6 +42,10 @@ argv: ["init"]
 - hard stop または conflict があったか
 
 秘密値そのものは表示しない。
+
+## アップグレード後
+
+CLI と skill をアップグレードした後は、導入済みの各ローカルプロジェクトで `codex-project init` を再実行する。既存の `.local/` 台帳を残したまま、管理対象の `AGENTS.md` ブロックと project-local hooks を現在のバージョンへ更新する。
 
 ## hooks
 
@@ -72,6 +80,8 @@ codex-project secret <set|get|list|delete>
 ```
 
 `secret set` は実行ツールの stdin で値を渡す。shell のパイプや引用規則には依存しない。`secret get` の出力は必要な処理だけに使い、チャット本文へ表示しない。平文ログには秘密値そのものではなく、保存名や参照だけを書く。
+
+ローカル暗号化が保護するのは保存後の vault データだけである。チャットへ送信済みの秘密値を取り消したり、チャット履歴、サービス側の保存領域、送信経路から秘匿したりするものではない。秘密値は可能な限りチャットへ送らず、送信済みなら必要に応じて失効・再発行を扱う。
 
 ## 後続チャットの読み込み
 
@@ -109,12 +119,13 @@ codex-project learn add <instruction|mistake|preference|rule> <lesson-as-one-arg
 codex-project learn capture
 ```
 
-候補は `.local/learn/` に保存され、hooks と `context` に短く表示される。ユーザーに管理を求めない。秘密値、個人情報の生データ、認証情報は学習メモに入れない。
+候補は `.local/learn/` に保存され、hooks と `context` に短く表示される。自動抽出された候補は未レビューの場合があるため、確定した事実や必須ルールとして無条件に扱わず、ユーザーの観測、現在のリポジトリ、明示された決定と照合する。ユーザーに管理を求めない。秘密値、個人情報の生データ、認証情報は学習メモに入れない。
 
 ## 安全ルール
 
 - `.local/` は個人情報を含みうるローカル専用領域として扱う。
 - `.local/` を commit、外部送信、貼り付けしない。
 - `.local/learn/` もローカル専用であり、秘密値や個人情報の生データを入れない。
+- 暗号化はローカル vault の保存データを保護するもので、チャットへ送信済みの秘密値やチャット履歴を保護しない。
 - `.local/` が git tracked で停止した場合は、その blocker をそのまま報告する。
 - 暗号化領域が開けない場合、平文 workaround を作らない。復旧不能または reset が必要な状態として報告する。

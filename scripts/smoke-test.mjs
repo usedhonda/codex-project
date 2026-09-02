@@ -78,6 +78,11 @@ function testFreshInitAndVault() {
   assert.ok(fs.existsSync(path.join(project, ".local", "chats", "thread-smoke-001", "initial-request.md")));
   assert.ok(fs.existsSync(path.join(project, ".local", "vault", "secrets.json.enc")));
   assert.match(fs.readFileSync(path.join(project, ".gitignore"), "utf8"), /^\.local\/$/m);
+  const agentsContract = fs.readFileSync(path.join(project, "AGENTS.md"), "utf8");
+  assert.match(agentsContract, /Deterministic Local Project Contract/);
+  assert.match(agentsContract, /Treat built-in local memory as useful recall/);
+  assert.match(agentsContract, /Never ask the user to paste a secret into chat for storage/);
+  assert.doesNotMatch(agentsContract, /If the user provides passwords/);
   const hooksJson = JSON.parse(fs.readFileSync(path.join(project, ".codex", "hooks.json"), "utf8"));
   const hookEntries = hooksJson.hooks.UserPromptSubmit.flatMap((group) => group.hooks || []);
   assert.ok(hookEntries.some((hook) => hook.command === "node existing-hook.mjs"));

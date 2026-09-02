@@ -1,7 +1,7 @@
 {
   "name": "codex-project",
   "version": "0.1.0",
-  "description": "Manage Codex App project-local memory, context, and encrypted notes.",
+  "description": "Deterministic local-project state, handoff, and encrypted notes for ChatGPT desktop Codex workflows.",
   "license": "MIT",
   "type": "module",
   "bin": {

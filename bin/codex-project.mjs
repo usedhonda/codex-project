@@ -962,10 +962,11 @@ function findAgentsMarkerPair(text) {
 
 function agentsBlock() {
   return `${INIT_START}
-## codex-project Project Memory Contract
+## codex-project Deterministic Local Project Contract
 
 - Treat \`.local/\` as private, project-local memory. It may contain personal data, credentials, and sensitive operational notes.
 - Never commit, upload, paste, or externally transmit \`.local/\` contents unless the user explicitly asks for a specific item.
+- Treat built-in local memory as useful recall, not as the source of truth for current state, decisions, or required rules.
 - At the start of each chat, read these files when present: \`.local/project.md\`, \`.local/state.md\`, \`.local/decisions.md\`, and \`.local/index.md\`.
 - At the start of each chat, also run \`codex-project context\` to list encrypted vault notes and secret names without exposing secret values.
 - Project-local Codex hooks are installed under \`.codex/\` by default. They run \`codex-project context --hook\` before user prompts so chats can notice shared state and learning notes without exposing secret values.
@@ -976,10 +977,10 @@ function agentsBlock() {
 - Keep chat-local notes under \`.local/chats/<chat-id>/\`: \`session.md\`, \`actions.md\`, and \`conversation.md\`.
 - Log meaningful work in \`.local/chats/<chat-id>/actions.md\`. Log important user instructions, decisions, and handoff context in \`conversation.md\`.
 - Keep shared current state in \`.local/state.md\`; keep durable project decisions in \`.local/decisions.md\`.
-- If the user provides passwords, API keys, tokens, personal secrets, or sensitive project notes in chat, store them through \`codex-project secret set\` or \`codex-project memory set\` yourself. Do not ask the user to run storage commands.
+- Never ask the user to paste a secret into chat for storage. If a secret was already provided or is available from an explicitly approved local source, store it through \`codex-project secret set\` or \`codex-project memory set\` without repeating it in chat.
 - Do not write secret values into plain Markdown logs. Record only the encrypted memory name, secret name, or a redacted reference.
 - Encryption keys are managed internally by codex-project. The user normally should not need to handle them.
-- If encrypted storage cannot be opened, report the blocker and use reset only when the user explicitly asks.
+- If a hook reports unavailable context, run \`codex-project context\` and report the blocker. If encrypted storage cannot be opened, use reset only when the user explicitly asks.
 - When \`$codex-project <free text>\`, \`codex-project init <free text>\`, or \`codex-project <free text>\` is used, treat the free text as a user request, not a casual note. Preserve intent, but record conflicts with repo facts in \`.local/conflicts.md\` instead of silently overwriting reality.
 ${INIT_END}`;
 }
