@@ -12,17 +12,23 @@ argument-hint: "[初期プロジェクト指示]"
 
 ## 共有記憶の追加
 
-引数がある場合:
+shell 固有の展開や引用に依存せず、実行ツールへ executable と argv を分けて渡す。
 
-```sh
-codex-project init "$ARGUMENTS"
+自由テキストがある場合:
+
+```text
+executable: codex-project
+argv: ["init", "<skill 呼び出し後の自由テキスト全体>"]
 ```
 
-引数がない場合:
+自由テキストがない場合:
 
-```sh
-codex-project init
+```text
+executable: codex-project
+argv: ["init"]
 ```
+
+自由テキスト内の空白や改行を保ち、全体を末尾の1 argv として渡す。単語ごとに分割しない。
 
 完了後は以下だけを報告する:
 
@@ -42,7 +48,7 @@ hook は `codex-project learn capture --hook` と `codex-project context --hook`
 
 管理コマンド:
 
-```sh
+```text
 codex-project hooks <install|status|remove>
 ```
 
@@ -52,39 +58,39 @@ Codex が hook の信頼確認を求めた場合は、hook が project-local で
 
 ユーザーが他チャットに読ませたいが、平文 Markdown に置きたくない共有情報を伝えた場合は、Codex が `memory` を使う。
 
-```sh
+```text
 codex-project memory <set|get|list|delete|import>
 ```
 
-`memory set` は標準入力で本文を渡す。`memory import` はプロジェクト内ファイルを暗号化メモへ取り込む。取り込み元の平文ファイルは自動削除しない。ユーザーに保存作業を依頼せず、Codex が必要に応じて実行する。
+`memory set` は実行ツールの stdin で本文を渡す。shell のパイプや引用規則には依存しない。`memory import` はプロジェクト内ファイルを暗号化メモへ取り込む。取り込み元の平文ファイルは自動削除しない。ユーザーに保存作業を依頼せず、Codex が必要に応じて実行する。
 
 ## 秘密値
 
 ユーザーが API キーやパスワードのような単体の秘密値を伝えた場合は、Codex が `secret` を使う。
 
-```sh
+```text
 codex-project secret <set|get|list|delete>
 ```
 
-`secret set` は標準入力で値を渡す。`secret get` の出力は必要な処理だけに使い、チャット本文へ表示しない。平文ログには秘密値そのものではなく、保存名や参照だけを書く。
+`secret set` は実行ツールの stdin で値を渡す。shell のパイプや引用規則には依存しない。`secret get` の出力は必要な処理だけに使い、チャット本文へ表示しない。平文ログには秘密値そのものではなく、保存名や参照だけを書く。
 
 ## 後続チャットの読み込み
 
 作業開始時は以下を実行して、平文共有ファイル、暗号化メモ名、秘密値名、プロジェクト内学習メモを確認する。
 
-```sh
+```text
 codex-project context
 ```
 
 必要な暗号化メモだけ読む。
 
-```sh
+```text
 codex-project memory get <name>
 ```
 
 hook用の短い表示:
 
-```sh
+```text
 codex-project context --hook
 ```
 
@@ -92,13 +98,15 @@ codex-project context --hook
 
 ユーザーが Codex のミスを指摘した、恒久的な指示を出した、好みを明示した、または他チャットにも効く注意点を伝えた場合は、会話ログに残したうえで学習候補を追加する。
 
-```sh
-codex-project learn add <instruction|mistake|preference|rule> "$LESSON"
+```text
+codex-project learn add <instruction|mistake|preference|rule> <lesson-as-one-argument>
 ```
+
+`<lesson-as-one-argument>` も実行ツールの1 argv として渡す。
 
 既存ログから候補化する場合:
 
-```sh
+```text
 codex-project learn capture
 ```
 

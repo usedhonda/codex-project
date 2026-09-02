@@ -10,9 +10,22 @@ Codex App では、1つのプロジェクトフォルダから複数のチャッ
 
 ## インストール
 
+macOS、Linux、WSL、native Windows をサポートします。Node.js、npm、Git が必要です。
+
+macOS、Linux、WSL:
+
 ```sh
 git clone https://github.com/usedhonda/codex-project.git
 cd codex-project
+npm link
+npm run install-skill
+```
+
+Windows PowerShell:
+
+```powershell
+git clone https://github.com/usedhonda/codex-project.git
+Set-Location codex-project
 npm link
 npm run install-skill
 ```
@@ -55,7 +68,6 @@ $codex-project Next.js の SaaS。認証は Clerk。
 - `.local/vault/secrets.json.enc`: 暗号化された保存領域
 - `.codex/config.toml`: project-local hooks を有効にする設定
 - `.codex/hooks.json`: このプロジェクト専用の hook 設定
-- `.codex/hooks/codex-project-context-hook.mjs`: 各ターン前に共有状態を短く表示する hook
 - `AGENTS.md`: 後続チャットが共有記憶を扱うためのルール
 
 `.local/` は `.gitignore` に追加されます。個人情報や秘密情報が入る前提なので、リポジトリには入れません。
@@ -96,15 +108,26 @@ Codex が同じプロジェクト内で同じミスを繰り返さないよう�
 
 必要な場合だけ、手動でも操作できます。普段はユーザーがこのコマンドを直接打つ前提ではありません。
 
+macOS、Linux、WSL:
+
 ```sh
 printf '%s' 'ここに個人情報を含む共有メモ' | codex-project memory set account
+printf '%s' 'example-value' | codex-project secret set api_token
+```
+
+Windows PowerShell:
+
+```powershell
+'private account note' | codex-project memory set account
+'example-value' | codex-project secret set api_token
+```
+
+読み取り、一覧、削除のコマンドは共通です。
+
+```text
 codex-project memory list
 codex-project memory get account
 codex-project memory delete account
-```
-
-```sh
-printf '%s' 'example-value' | codex-project secret set api_token
 codex-project secret list
 codex-project secret get api_token
 codex-project secret delete api_token
@@ -141,8 +164,9 @@ Codex が新しい hook を検出したときは、Codex 側の `/hooks` で信�
 - 個人情報、パスワード、API キー、公開したくない共有メモをユーザーがチャットで伝えた場合、Codex が `memory` または `secret` に保存し、平文 Markdown には値そのものを書きません。
 - 学習メモにも秘密値や個人情報の生データを入れません。
 - 暗号化の鍵は内部管理されます。通常、ユーザーが意識する必要はありません。
+- native Windows では、プロジェクト外に暗号化 vault の鍵を初めて作成するとき、sandbox の許可を1回求められることがあります。
 - 暗号化は、`.local/` だけが流出した場合や誤コミットを防ぐためのものです。
-- 同じ Mac の同じユーザー権限を完全に奪われた場合は、防御できません。
+- 同じ環境の同じユーザー権限を完全に奪われた場合は、防御できません。
 - 暗号化データは同じ環境で読む前提です。マシン移行時は別途エクスポートまたは移行が必要です。
 
 ## 開発
