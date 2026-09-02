@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
 
-const root = path.resolve(new URL("..", import.meta.url).pathname);
+const root = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const cli = path.join(root, "bin", "codex-project.mjs");
+const skillInstaller = path.join(root, "scripts", "install-skill.mjs");
+const legacyHookCommand = 'root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; node "$root/.codex/hooks/codex-project-context-hook.mjs" "$root"';
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-project-smoke-"));
 
@@ -15,6 +18,7 @@ try {
   testFreshInitAndVault();
   testTrackedLocalStops();
   testMissingKeyAndReset();
+  testSkillInstaller();
   console.log("smoke tests passed");
 } finally {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -44,6 +48,16 @@ function testFreshInitAndVault() {
   fs.mkdirSync(home, { recursive: true });
   fs.mkdirSync(project, { recursive: true });
   fs.writeFileSync(path.join(project, "README.md"), "# Demo\n");
+  execFileSync("git", ["init", "-q"], { cwd: project });
+  fs.mkdirSync(path.join(project, ".codex"), { recursive: true });
+  fs.writeFileSync(
+    path.join(project, ".codex", "hooks.json"),
+    `${JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [{ hooks: [{ type: "command", command: "node existing-hook.mjs" }] }],
+      },
+    }, null, 2)}\n`,
+  );
 
   const initOutput = run(project, home, ["init", "Demo app. api_key=abc123"], {
     CODEX_THREAD_ID: "thread-smoke-001",
@@ -55,10 +69,16 @@ function testFreshInitAndVault() {
   assert.ok(fs.existsSync(path.join(project, ".local", "learn", "rules")));
   assert.ok(fs.existsSync(path.join(project, ".codex", "config.toml")));
   assert.ok(fs.existsSync(path.join(project, ".codex", "hooks.json")));
-  assert.ok(fs.existsSync(path.join(project, ".codex", "hooks", "codex-project-context-hook.mjs")));
+  assert.equal(fs.existsSync(path.join(project, ".codex", "hooks", "codex-project-context-hook.mjs")), false);
   assert.ok(fs.existsSync(path.join(project, ".local", "chats", "thread-smoke-001", "initial-request.md")));
   assert.ok(fs.existsSync(path.join(project, ".local", "vault", "secrets.json.enc")));
   assert.match(fs.readFileSync(path.join(project, ".gitignore"), "utf8"), /^\.local\/$/m);
+  const hooksJson = JSON.parse(fs.readFileSync(path.join(project, ".codex", "hooks.json"), "utf8"));
+  const hookEntries = hooksJson.hooks.UserPromptSubmit.flatMap((group) => group.hooks || []);
+  assert.ok(hookEntries.some((hook) => hook.command === "node existing-hook.mjs"));
+  assert.ok(hookEntries.some((hook) =>
+    hook.command === "codex-project hook" && hook.commandWindows === "codex-project.cmd hook"
+  ));
 
   run(project, home, ["secret", "set", "demo_token"], {}, "dummy-secret-value");
   const list = run(project, home, ["secret", "list"]);
@@ -105,6 +125,11 @@ function testFreshInitAndVault() {
   const hookContextAfterLearn = run(project, home, ["context", "--hook"]);
   assert.match(hookContextAfterLearn, /learning_notes:/);
   assert.match(hookContextAfterLearn, /candidate mistake/);
+  const nestedDir = path.join(project, "nested");
+  fs.mkdirSync(nestedDir);
+  const internalHookContext = run(nestedDir, home, ["hook"]);
+  assert.match(internalHookContext, /^\[codex-project context\]/m);
+  assert.equal(fs.existsSync(path.join(nestedDir, ".local")), false);
   run(project, home, ["learn", "promote", learnId]);
   const hookContextAfterPromote = run(project, home, ["context", "--hook"]);
   assert.match(hookContextAfterPromote, /mistake: READMEには未実装機能/);
@@ -121,7 +146,14 @@ function testFreshInitAndVault() {
   run(project, home, ["hooks", "remove"]);
   const hooksStatusAfterRemove = run(project, home, ["hooks", "status"]);
   assert.match(hooksStatusAfterRemove, /project_hooks: not_installed/);
+  assert.ok(readHookEntries(project).some((hook) => hook.command === "node existing-hook.mjs"));
+  installLegacyHook(project);
+  const legacyHooksStatus = run(project, home, ["hooks", "status"]);
+  assert.match(legacyHooksStatus, /project_hooks: outdated/);
   run(project, home, ["hooks", "install"]);
+  assert.equal(fs.existsSync(path.join(project, ".codex", "hooks", "codex-project-context-hook.mjs")), false);
+  assert.match(run(project, home, ["hooks", "status"]), /project_hooks: installed/);
+  assert.ok(readHookEntries(project).some((hook) => hook.command === "node existing-hook.mjs"));
   const searchableAfterMemory = collectText(project, [".local", ".codex", "AGENTS.md", ".gitignore"]);
   assert.equal(searchableAfterMemory.includes("sensitive shared note"), false);
 
@@ -129,6 +161,8 @@ function testFreshInitAndVault() {
   assert.ok(fs.existsSync(keyPath));
   const keyExport = run(project, home, ["vault", "key", "export"]).trim();
   assert.equal(Buffer.from(keyExport, "base64").length, 32);
+  assertWindowsPrivateAcl(keyPath);
+  assertWindowsPrivateAcl(path.join(project, ".local"));
 
   const legacyKeyPath = keyPath.replace(
     `${path.sep}.codex${path.sep}codex-project${path.sep}`,
@@ -147,7 +181,7 @@ function testTrackedLocalStops() {
   fs.mkdirSync(path.join(project, ".local"), { recursive: true });
   fs.writeFileSync(path.join(project, ".local", "secret.txt"), "tracked\n");
   execFileSync("git", ["init", "-q"], { cwd: project });
-  execFileSync("git", ["add", ".local/secret.txt"], { cwd: project });
+  execFileSync("git", ["add", "-f", ".local/secret.txt"], { cwd: project });
 
   const result = runRaw(project, home, ["init"]);
   assert.notEqual(result.status, 0);
@@ -177,6 +211,36 @@ function testMissingKeyAndReset() {
   assert.equal(run(project, home, ["secret", "list"]), "");
 }
 
+function testSkillInstaller() {
+  const home = path.join(tmpRoot, "home-installer");
+  const skillsDir = path.join(home, ".agents", "skills");
+  const legacyLink = path.join(skillsDir, "init-codex-project");
+  const installed = path.join(skillsDir, "codex-project");
+  const staleSource = path.join(home, "stale-codex-project");
+  fs.mkdirSync(skillsDir, { recursive: true });
+  fs.mkdirSync(staleSource);
+  fs.symlinkSync(
+    path.join(root, ".agents", "skills", "codex-project"),
+    legacyLink,
+    process.platform === "win32" ? "junction" : "dir",
+  );
+  fs.symlinkSync(staleSource, installed, process.platform === "win32" ? "junction" : "dir");
+
+  runInstaller(home);
+  runInstaller(home);
+  assert.ok(fs.lstatSync(installed).isSymbolicLink());
+  assert.equal(fs.realpathSync(installed), fs.realpathSync(path.join(root, ".agents", "skills", "codex-project")));
+  assert.equal(fs.existsSync(legacyLink), false);
+
+  const conflictHome = path.join(tmpRoot, "home-installer-conflict");
+  const conflictPath = path.join(conflictHome, ".agents", "skills", "codex-project");
+  fs.mkdirSync(conflictPath, { recursive: true });
+  const conflict = runInstallerRaw(conflictHome);
+  assert.notEqual(conflict.status, 0);
+  assert.match(conflict.stderr, /not a managed link/);
+  assert.ok(fs.statSync(conflictPath).isDirectory());
+}
+
 function run(cwd, home, args, extraEnv = {}, input = "") {
   const result = runRaw(cwd, home, args, extraEnv, input);
   if (result.status !== 0) {
@@ -193,6 +257,7 @@ function runRaw(cwd, home, args, extraEnv = {}, input = "") {
     env: {
       ...process.env,
       HOME: home,
+      USERPROFILE: home,
       ...extraEnv,
     },
   });
@@ -201,6 +266,80 @@ function runRaw(cwd, home, args, extraEnv = {}, input = "") {
     stdout: result.stdout || "",
     stderr: result.stderr || "",
   };
+}
+
+function runInstaller(home) {
+  const result = runInstallerRaw(home);
+  if (result.status !== 0) {
+    throw new Error(`skill installer failed\n${result.stderr}`);
+  }
+}
+
+function runInstallerRaw(home) {
+  return spawnSync(process.execPath, [skillInstaller], {
+    encoding: "utf8",
+    env: { ...process.env, HOME: home, USERPROFILE: home },
+  });
+}
+
+function installLegacyHook(project) {
+  const hooksDir = path.join(project, ".codex", "hooks");
+  fs.mkdirSync(hooksDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(project, ".codex", "hooks.json"),
+    `${JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [{
+          hooks: [
+            { type: "command", command: "node existing-hook.mjs" },
+            { type: "command", command: legacyHookCommand },
+          ],
+        }],
+      },
+    }, null, 2)}\n`,
+  );
+  fs.writeFileSync(
+    path.join(hooksDir, "codex-project-context-hook.mjs"),
+    `#!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+
+const root = process.argv[2] || process.cwd();
+spawnSync("codex-project", ["learn", "capture", "--hook"], {
+  cwd: root,
+  encoding: "utf8",
+});
+const result = spawnSync("codex-project", ["context", "--hook"], {
+  cwd: root,
+  encoding: "utf8",
+});
+
+if (result.status === 0 && result.stdout) {
+  process.stdout.write(result.stdout);
+}
+`,
+  );
+}
+
+function readHookEntries(project) {
+  const hooksJson = JSON.parse(fs.readFileSync(path.join(project, ".codex", "hooks.json"), "utf8"));
+  return (hooksJson.hooks?.UserPromptSubmit || []).flatMap((group) => group.hooks || []);
+}
+
+function assertWindowsPrivateAcl(targetPath) {
+  if (process.platform !== "win32") {
+    return;
+  }
+  const command = [
+    "$acl = Get-Acl -LiteralPath $env:CODEX_PROJECT_ACL_TARGET",
+    "$allowed = @([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18')",
+    "if (-not $acl.AreAccessRulesProtected) { exit 2 }",
+    "$unexpected = $acl.Access | Where-Object { $_.AccessControlType -eq 'Allow' -and $allowed -notcontains $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }",
+    "if ($unexpected) { exit 3 }",
+  ].join("; ");
+  execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], {
+    env: { ...process.env, CODEX_PROJECT_ACL_TARGET: targetPath },
+    stdio: "pipe",
+  });
 }
 
 function collectText(base, includePaths) {

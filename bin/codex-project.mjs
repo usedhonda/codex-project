@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 const COMMAND_NAME = "codex-project";
@@ -11,9 +12,14 @@ const INIT_END = "<!-- CODEX-PROJECT-MEMORY-END -->";
 const LEGACY_INIT_START = "<!-- INIT-CDXAPP -->";
 const LEGACY_INIT_END = "<!-- INIT-CDXAPP-END -->";
 const HOOK_SCRIPT_NAME = "codex-project-context-hook.mjs";
-const HOOK_COMMAND = `root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; node "$root/.codex/hooks/${HOOK_SCRIPT_NAME}" "$root"`;
+const HOOK_COMMAND = `${COMMAND_NAME} hook`;
+const HOOK_COMMAND_WINDOWS = `${COMMAND_NAME}.cmd hook`;
+const LEGACY_HOOK_COMMAND = `root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; node "$root/.codex/hooks/${HOOK_SCRIPT_NAME}" "$root"`;
 const VAULT_VERSION = 1;
 const ALGORITHM = "aes-256-gcm";
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const WINDOWS_ACL_SCRIPT = path.join(PACKAGE_ROOT, "scripts", "set-private-acl.ps1");
+const securedWindowsDirs = new Set();
 
 main().catch((error) => {
   console.error(`${COMMAND_NAME}: ${error.message}`);
@@ -56,6 +62,11 @@ async function main() {
 
   if (args[0] === "learn") {
     await handleLearnCommand(root, args.slice(1));
+    return;
+  }
+
+  if (args[0] === "hook") {
+    runProjectHook(root);
     return;
   }
 
@@ -484,21 +495,17 @@ function printHookContext(root, localDir, files, vault) {
 
 function installHooks(root) {
   const codexDir = path.join(root, ".codex");
-  const hooksDir = path.join(codexDir, "hooks");
   mkdir(codexDir, 0o755);
-  mkdir(hooksDir, 0o755);
   ensureProjectConfig(path.join(codexDir, "config.toml"));
-  writeHookScript(path.join(hooksDir, HOOK_SCRIPT_NAME));
   upsertHooksJson(path.join(codexDir, "hooks.json"));
+  removeLegacyHookScript(root);
 }
 
 function printHooksStatus(root) {
   const hooksPath = path.join(root, ".codex", "hooks.json");
-  const scriptPath = path.join(root, ".codex", "hooks", HOOK_SCRIPT_NAME);
-  const installed = hookEntryExists(hooksPath) && fs.existsSync(scriptPath);
-  console.log(`project_hooks: ${installed ? "installed" : "not_installed"}`);
+  const state = hookEntryState(hooksPath);
+  console.log(`project_hooks: ${state}`);
   console.log(`hooks_json: ${path.relative(root, hooksPath)}`);
-  console.log(`hook_script: ${path.relative(root, scriptPath)}`);
 }
 
 function removeHooks(root) {
@@ -506,12 +513,7 @@ function removeHooks(root) {
   if (fs.existsSync(hooksPath)) {
     const hooksJson = readHooksJson(hooksPath);
     const groups = hooksJson.hooks?.UserPromptSubmit || [];
-    const nextGroups = groups
-      .map((group) => ({
-        ...group,
-        hooks: (group.hooks || []).filter((hook) => hook.command !== HOOK_COMMAND),
-      }))
-      .filter((group) => group.hooks.length > 0);
+    const nextGroups = removeManagedHookEntries(groups);
     if (!hooksJson.hooks) {
       hooksJson.hooks = {};
     }
@@ -523,10 +525,7 @@ function removeHooks(root) {
     fs.writeFileSync(hooksPath, `${JSON.stringify(hooksJson, null, 2)}\n`, { mode: 0o644 });
   }
 
-  const scriptPath = path.join(root, ".codex", "hooks", HOOK_SCRIPT_NAME);
-  if (fs.existsSync(scriptPath) && fs.readFileSync(scriptPath, "utf8") === hookScriptTemplate()) {
-    fs.unlinkSync(scriptPath);
-  }
+  removeLegacyHookScript(root);
 }
 
 function ensureProjectConfig(configPath) {
@@ -546,31 +545,38 @@ function ensureProjectConfig(configPath) {
   );
 }
 
-function writeHookScript(scriptPath) {
-  fs.writeFileSync(scriptPath, hookScriptTemplate(), { mode: 0o755 });
-  fs.chmodSync(scriptPath, 0o755);
-}
-
 function upsertHooksJson(hooksPath) {
   const hooksJson = readHooksJson(hooksPath);
   if (!hooksJson.hooks) {
     hooksJson.hooks = {};
   }
-  const groups = hooksJson.hooks.UserPromptSubmit || [];
-  if (!groups.some((group) => (group.hooks || []).some((hook) => hook.command === HOOK_COMMAND))) {
-    groups.push({
-      hooks: [
-        {
-          type: "command",
-          command: HOOK_COMMAND,
-          timeout: 5,
-          statusMessage: "Reading codex-project memory",
-        },
-      ],
-    });
-  }
+  const groups = removeManagedHookEntries(hooksJson.hooks.UserPromptSubmit || []);
+  groups.push({
+    hooks: [
+      {
+        type: "command",
+        command: HOOK_COMMAND,
+        commandWindows: HOOK_COMMAND_WINDOWS,
+        timeout: 5,
+        statusMessage: "Reading codex-project memory",
+      },
+    ],
+  });
   hooksJson.hooks.UserPromptSubmit = groups;
   fs.writeFileSync(hooksPath, `${JSON.stringify(hooksJson, null, 2)}\n`, { mode: 0o644 });
+}
+
+function removeManagedHookEntries(groups) {
+  return groups
+    .map((group) => ({
+      ...group,
+      hooks: (group.hooks || []).filter((hook) => !isManagedHookEntry(hook)),
+    }))
+    .filter((group) => group.hooks.length > 0);
+}
+
+function isManagedHookEntry(hook) {
+  return hook?.type === "command" && [HOOK_COMMAND, LEGACY_HOOK_COMMAND].includes(hook.command);
 }
 
 function readHooksJson(hooksPath) {
@@ -585,17 +591,22 @@ function readHooksJson(hooksPath) {
   }
 }
 
-function hookEntryExists(hooksPath) {
+function hookEntryState(hooksPath) {
   if (!fs.existsSync(hooksPath)) {
-    return false;
+    return "not_installed";
   }
   const hooksJson = readHooksJson(hooksPath);
-  return (hooksJson.hooks?.UserPromptSubmit || []).some((group) =>
-    (group.hooks || []).some((hook) => hook.command === HOOK_COMMAND),
-  );
+  const entries = (hooksJson.hooks?.UserPromptSubmit || []).flatMap((group) => group.hooks || []);
+  if (entries.some((hook) => hook.command === HOOK_COMMAND && hook.commandWindows === HOOK_COMMAND_WINDOWS)) {
+    return "installed";
+  }
+  if (entries.some((hook) => isManagedHookEntry(hook))) {
+    return "outdated";
+  }
+  return "not_installed";
 }
 
-function hookScriptTemplate() {
+function legacyHookScriptTemplate() {
   return `#!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 
@@ -613,6 +624,39 @@ if (result.status === 0 && result.stdout) {
   process.stdout.write(result.stdout);
 }
 `;
+}
+
+function removeLegacyHookScript(root) {
+  const scriptPath = path.join(root, ".codex", "hooks", HOOK_SCRIPT_NAME);
+  if (fs.existsSync(scriptPath) && fs.readFileSync(scriptPath, "utf8") === legacyHookScriptTemplate()) {
+    fs.unlinkSync(scriptPath);
+  }
+}
+
+function runProjectHook(root) {
+  const projectRoot = resolveProjectRoot(root);
+  try {
+    ensureLocalNotTracked(projectRoot);
+    ensureGitignore(projectRoot);
+    ensureLearnDirs(projectRoot);
+    const candidates = captureLearningCandidates(projectRoot);
+    candidates.forEach((candidate) => writeLearningCandidate(projectRoot, candidate));
+  } catch {
+    // Learning capture is best-effort and must not prevent context loading.
+  }
+  try {
+    printContext(projectRoot, { hook: true });
+  } catch {
+    // Preserve the existing non-blocking hook behavior when context is unavailable.
+  }
+}
+
+function resolveProjectRoot(root) {
+  try {
+    return execGit(root, ["rev-parse", "--show-toplevel"]).trim();
+  } catch {
+    return root;
+  }
 }
 
 function ensureLearnDirs(root) {
@@ -654,7 +698,7 @@ function writeLearningCandidate(root, candidate) {
     return false;
   }
   fs.writeFileSync(candidatePath, `${JSON.stringify(candidate, null, 2)}\n`, { mode: 0o600 });
-  fs.chmodSync(candidatePath, 0o600);
+  setMode(candidatePath, 0o600);
   return true;
 }
 
@@ -809,7 +853,7 @@ function promoteLearningCandidate(root, id) {
   candidate.promotedAt = new Date().toISOString();
   const rulePath = getLearningPath(root, "rules", id);
   fs.writeFileSync(rulePath, `${JSON.stringify(candidate, null, 2)}\n`, { mode: 0o600 });
-  fs.chmodSync(rulePath, 0o600);
+  setMode(rulePath, 0o600);
   fs.unlinkSync(candidatePath);
 }
 
@@ -824,7 +868,7 @@ function rejectLearningCandidate(root, id) {
   candidate.rejectedAt = new Date().toISOString();
   const rejectedPath = getLearningPath(root, "rejected", id);
   fs.writeFileSync(rejectedPath, `${JSON.stringify(candidate, null, 2)}\n`, { mode: 0o600 });
-  fs.chmodSync(rejectedPath, 0o600);
+  setMode(rejectedPath, 0o600);
   fs.unlinkSync(candidatePath);
 }
 
@@ -1158,6 +1202,10 @@ function extractSecrets(text) {
 
 function ensureVault(root) {
   const vaultPath = getVaultPath(root);
+  const localDir = path.join(root, ".local");
+  if (fs.existsSync(localDir)) {
+    setMode(localDir, 0o700);
+  }
   mkdir(path.dirname(vaultPath), 0o700);
   if (!fs.existsSync(vaultPath)) {
     readOrCreateProjectKey(getProjectInfo(root).projectId);
@@ -1178,6 +1226,8 @@ function readProjectKey(projectId) {
       ].join("\n"),
     );
   }
+  setMode(path.dirname(keyPath), 0o700);
+  setMode(keyPath, 0o600);
   return parseProjectKey(keyPath);
 }
 
@@ -1186,6 +1236,7 @@ function readVault(root) {
   if (!fs.existsSync(vaultPath)) {
     return createEmptyVault();
   }
+  setMode(vaultPath, 0o600);
   const envelope = JSON.parse(fs.readFileSync(vaultPath, "utf8"));
   if (envelope.version !== VAULT_VERSION || envelope.algorithm !== ALGORITHM) {
     throw new Error("unsupported vault format");
@@ -1224,7 +1275,7 @@ function writeVault(root, vault) {
   const vaultPath = getVaultPath(root);
   mkdir(path.dirname(vaultPath), 0o700);
   fs.writeFileSync(vaultPath, `${JSON.stringify(envelope, null, 2)}\n`, { mode: 0o600 });
-  fs.chmodSync(vaultPath, 0o600);
+  setMode(vaultPath, 0o600);
 }
 
 function resetVault(root) {
@@ -1266,7 +1317,7 @@ function readOrCreateProjectKey(projectId) {
   mkdir(path.dirname(keyPath), 0o700);
   if (!fs.existsSync(keyPath)) {
     fs.writeFileSync(keyPath, `${crypto.randomBytes(32).toString("hex")}\n`, { mode: 0o600 });
-    fs.chmodSync(keyPath, 0o600);
+    setMode(keyPath, 0o600);
   }
   return parseProjectKey(keyPath);
 }
@@ -1277,7 +1328,7 @@ function migrateLegacyKeyIfNeeded(projectId) {
   if (!fs.existsSync(keyPath) && fs.existsSync(legacyKeyPath)) {
     mkdir(path.dirname(keyPath), 0o700);
     fs.copyFileSync(legacyKeyPath, keyPath);
-    fs.chmodSync(keyPath, 0o600);
+    setMode(keyPath, 0o600);
   }
   return keyPath;
 }
@@ -1346,19 +1397,68 @@ async function readStdin() {
 
 function ensureFile(filePath, contents, mode) {
   if (fs.existsSync(filePath)) {
+    setMode(filePath, mode);
     return;
   }
   mkdir(path.dirname(filePath), 0o700);
   fs.writeFileSync(filePath, contents, { mode });
+  setMode(filePath, mode);
 }
 
 function mkdir(dir, mode) {
   fs.mkdirSync(dir, { recursive: true, mode });
+  if (process.platform === "win32") {
+    setMode(dir, mode);
+    return;
+  }
   try {
     fs.chmodSync(dir, mode);
   } catch {
     // chmod can fail on filesystems that do not honor POSIX permissions.
   }
+}
+
+function setMode(targetPath, mode) {
+  if (process.platform === "win32") {
+    if (mode === 0o600 || mode === 0o700) {
+      const privateDir = fs.statSync(targetPath).isDirectory() ? targetPath : path.dirname(targetPath);
+      if (![...securedWindowsDirs].some((securedDir) => isSameOrChildPath(privateDir, securedDir))) {
+        setWindowsPrivateAcl(privateDir);
+        securedWindowsDirs.add(path.resolve(privateDir).toLowerCase());
+      }
+    }
+    return;
+  }
+  fs.chmodSync(targetPath, mode);
+}
+
+function setWindowsPrivateAcl(targetPath) {
+  try {
+    execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        WINDOWS_ACL_SCRIPT,
+        "-TargetPath",
+        targetPath,
+        "-Kind",
+        "Directory",
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+  } catch (error) {
+    const detail = String(error.stderr || error.message || "unknown error").trim();
+    throw new Error(`cannot secure private path on Windows: ${targetPath}${detail ? ` (${detail})` : ""}`);
+  }
+}
+
+function isSameOrChildPath(candidate, parent) {
+  const relative = path.relative(parent, path.resolve(candidate).toLowerCase());
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
 
 function isGitRepository(root) {

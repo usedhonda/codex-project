@@ -1,7 +1,6 @@
 ---
 name: codex-project
 description: Codex App の同じプロジェクト内にある複数チャットへ、.local の共有メモリ、チャット別ログ、AGENTS.md ルール、内部暗号化メモリ、project-local hooks、プロジェクト内学習メモを追加する。Codex Project、codex-project、project memory、共有記憶の依頼で使う。
-argument-hint: "[初期プロジェクト指示]"
 ---
 
 # codex-project
