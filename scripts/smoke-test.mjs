@@ -389,7 +389,8 @@ function assertWindowsPrivateAcl(targetPath) {
   }
   const command = [
     "$target = $env:CODEX_PROJECT_ACL_TARGET",
-    "$acl = if ([System.IO.Directory]::Exists($target)) { [System.IO.Directory]::GetAccessControl($target) } else { [System.IO.File]::GetAccessControl($target) }",
+    "$privateDirectory = if ([System.IO.Directory]::Exists($target)) { $target } else { [System.IO.Path]::GetDirectoryName($target) }",
+    "$acl = [System.IO.Directory]::GetAccessControl($privateDirectory)",
     "$allowed = @([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18')",
     "if (-not $acl.AreAccessRulesProtected) { exit 2 }",
     "$rules = $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])",
