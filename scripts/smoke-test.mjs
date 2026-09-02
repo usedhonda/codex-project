@@ -388,10 +388,12 @@ function assertWindowsPrivateAcl(targetPath) {
     return;
   }
   const command = [
-    "$acl = Get-Acl -LiteralPath $env:CODEX_PROJECT_ACL_TARGET",
+    "$target = $env:CODEX_PROJECT_ACL_TARGET",
+    "$acl = if ([System.IO.Directory]::Exists($target)) { [System.IO.Directory]::GetAccessControl($target) } else { [System.IO.File]::GetAccessControl($target) }",
     "$allowed = @([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18')",
     "if (-not $acl.AreAccessRulesProtected) { exit 2 }",
-    "$unexpected = $acl.Access | Where-Object { $_.AccessControlType -eq 'Allow' -and $allowed -notcontains $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }",
+    "$rules = $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])",
+    "$unexpected = $rules | Where-Object { $_.AccessControlType -eq 'Allow' -and $allowed -notcontains $_.IdentityReference.Value }",
     "if ($unexpected) { exit 3 }",
   ].join("; ");
   execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], {
