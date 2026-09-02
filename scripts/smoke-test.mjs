@@ -16,6 +16,8 @@ const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-project-smoke-"));
 try {
   testHelpDoesNotInit();
   testFreshInitAndVault();
+  testProjectIdentityMigrationAndMove();
+  testInvalidProjectIdentityStops();
   testTrackedLocalStops();
   testMissingKeyAndReset();
   testSkillInstaller();
@@ -65,6 +67,9 @@ function testFreshInitAndVault() {
   assert.equal(initOutput.includes("vault_key"), false);
 
   assert.ok(fs.existsSync(path.join(project, ".local", "project.md")));
+  const projectId = fs.readFileSync(path.join(project, ".local", "project-id"), "utf8").trim();
+  assert.match(projectId, /^[a-f0-9]{32}$/);
+  assert.match(fs.readFileSync(path.join(project, ".local", "project.md"), "utf8"), new RegExp(`project_id: ${projectId}`));
   assert.ok(fs.existsSync(path.join(project, ".local", "learn", "candidates")));
   assert.ok(fs.existsSync(path.join(project, ".local", "learn", "rules")));
   assert.ok(fs.existsSync(path.join(project, ".codex", "config.toml")));
@@ -174,6 +179,47 @@ function testFreshInitAndVault() {
   assert.ok(fs.existsSync(keyPath));
 }
 
+function testProjectIdentityMigrationAndMove() {
+  const home = path.join(tmpRoot, "home-project-move");
+  const original = path.join(tmpRoot, "project-before-move");
+  const moved = path.join(tmpRoot, "project-after-move");
+  fs.mkdirSync(home, { recursive: true });
+  fs.mkdirSync(original, { recursive: true });
+
+  run(original, home, ["init"]);
+  run(original, home, ["secret", "set", "move_test"], {}, "survives-move");
+  const originalId = fs.readFileSync(path.join(original, ".local", "project-id"), "utf8").trim();
+  const originalKeyPath = run(original, home, ["vault", "key", "path"]).trim();
+
+  fs.unlinkSync(path.join(original, ".local", "project-id"));
+  fs.renameSync(original, moved);
+
+  assert.match(run(moved, home, ["context"]), /move_test/);
+  assert.equal(run(moved, home, ["secret", "get", "move_test"]), "survives-move");
+  assert.equal(fs.readFileSync(path.join(moved, ".local", "project-id"), "utf8").trim(), originalId);
+  assert.equal(run(moved, home, ["vault", "key", "path"]).trim(), originalKeyPath);
+
+  run(moved, home, ["init"]);
+  assert.match(
+    fs.readFileSync(path.join(moved, ".local", "project.md"), "utf8"),
+    new RegExp(`^- root: ${escapeRegExp(fs.realpathSync(moved))}$`, "m"),
+  );
+}
+
+function testInvalidProjectIdentityStops() {
+  const home = path.join(tmpRoot, "home-invalid-project-id");
+  const project = path.join(tmpRoot, "project-invalid-project-id");
+  fs.mkdirSync(home, { recursive: true });
+  fs.mkdirSync(project, { recursive: true });
+
+  run(project, home, ["init"]);
+  fs.writeFileSync(path.join(project, ".local", "project-id"), "invalid\n");
+  const result = runRaw(project, home, ["context"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /invalid project identity/);
+  assert.equal(fs.existsSync(path.join(project, ".local", "vault", "lost")), false);
+}
+
 function testTrackedLocalStops() {
   const home = path.join(tmpRoot, "home-tracked");
   const project = path.join(tmpRoot, "project-tracked");
@@ -204,6 +250,13 @@ function testMissingKeyAndReset() {
   assert.notEqual(missing.status, 0);
   assert.match(missing.stderr, /encrypted storage cannot be opened/);
   assert.match(missing.stderr, /vault reset --yes/);
+
+  const hook = runRaw(project, home, ["hook"]);
+  assert.equal(hook.status, 0);
+  assert.equal(hook.stdout, "");
+  assert.match(hook.stderr, /context_unavailable: missing_vault_key/);
+  assert.match(hook.stderr, /run `codex-project context`/);
+  assert.equal(hook.stderr.includes(keyPath), false);
 
   run(project, home, ["vault", "reset", "--yes"]);
   assert.ok(fs.existsSync(path.join(project, ".local", "vault", "lost")));
@@ -352,6 +405,10 @@ function collectText(base, includePaths) {
     walk(full, chunks);
   }
   return chunks.join("\n");
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function walk(target, chunks) {

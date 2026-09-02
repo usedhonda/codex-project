@@ -15,6 +15,7 @@ const HOOK_SCRIPT_NAME = "codex-project-context-hook.mjs";
 const HOOK_COMMAND = `${COMMAND_NAME} hook`;
 const HOOK_COMMAND_WINDOWS = `${COMMAND_NAME}.cmd hook`;
 const LEGACY_HOOK_COMMAND = `root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; node "$root/.codex/hooks/${HOOK_SCRIPT_NAME}" "$root"`;
+const PROJECT_ID_FILE = "project-id";
 const VAULT_VERSION = 1;
 const ALGORITHM = "aes-256-gcm";
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -121,11 +122,13 @@ async function initializeProject(root, initialRequest) {
     ? storeInitialRequest(root, chatDir, initialRequest)
     : { redactedText: "", secretNames: [] };
 
+  const projectPath = path.join(localDir, "project.md");
   ensureFile(
-    path.join(localDir, "project.md"),
+    projectPath,
     projectTemplate(project, scan, storedRequest.redactedText, now),
     0o600,
   );
+  refreshProjectMetadata(projectPath, project);
   ensureFile(path.join(localDir, "state.md"), stateTemplate(now), 0o600);
   ensureFile(path.join(localDir, "decisions.md"), decisionsTemplate(now), 0o600);
   ensureFile(path.join(localDir, "conflicts.md"), conflictsTemplate(now), 0o600);
@@ -641,22 +644,46 @@ function runProjectHook(root) {
     ensureLearnDirs(projectRoot);
     const candidates = captureLearningCandidates(projectRoot);
     candidates.forEach((candidate) => writeLearningCandidate(projectRoot, candidate));
-  } catch {
-    // Learning capture is best-effort and must not prevent context loading.
+  } catch (error) {
+    printHookWarning("learning_capture", error, "codex-project learn capture");
   }
   try {
     printContext(projectRoot, { hook: true });
-  } catch {
-    // Preserve the existing non-blocking hook behavior when context is unavailable.
+  } catch (error) {
+    printHookWarning("context", error, "codex-project context");
   }
 }
 
 function resolveProjectRoot(root) {
+  let candidate = root;
   try {
-    return execGit(root, ["rev-parse", "--show-toplevel"]).trim();
+    candidate = execGit(root, ["rev-parse", "--show-toplevel"]).trim();
   } catch {
-    return root;
+    // Non-git local projects use the current working directory.
   }
+  return fs.realpathSync.native(candidate);
+}
+
+function printHookWarning(scope, error, command) {
+  const code = classifyHookError(error);
+  console.error(`[codex-project hook warning] ${scope}_unavailable: ${code}; run \`${command}\``);
+}
+
+function classifyHookError(error) {
+  const message = String(error?.message || error);
+  if (message.includes("internal key is missing")) {
+    return "missing_vault_key";
+  }
+  if (message.includes("cannot secure private path on Windows")) {
+    return "private_path_permissions";
+  }
+  if (message.includes(".local is already tracked")) {
+    return "tracked_local_memory";
+  }
+  if (message.includes("project identity")) {
+    return "invalid_project_identity";
+  }
+  return "unexpected_error";
 }
 
 function ensureLearnDirs(root) {
@@ -1057,6 +1084,17 @@ function projectTemplate(project, scan, initialRequest, now) {
   ].join("\n");
 }
 
+function refreshProjectMetadata(projectPath, project) {
+  const current = fs.readFileSync(projectPath, "utf8");
+  const next = current
+    .replace(/^- project_id:.*$/m, `- project_id: ${project.projectId}`)
+    .replace(/^- root:.*$/m, `- root: ${project.root}`);
+  if (next !== current) {
+    fs.writeFileSync(projectPath, next, { mode: 0o600 });
+    setMode(projectPath, 0o600);
+  }
+}
+
 function stateTemplate(now) {
   return [
     "# State",
@@ -1356,8 +1394,55 @@ function getLegacyKeyPath(projectId) {
 
 function getProjectInfo(root) {
   const realRoot = fs.realpathSync(root);
-  const projectId = crypto.createHash("sha256").update(realRoot).digest("hex").slice(0, 32);
+  const projectId = readOrCreateProjectId(realRoot);
   return { root: realRoot, projectId };
+}
+
+function readOrCreateProjectId(root) {
+  const markerPath = path.join(root, ".local", PROJECT_ID_FILE);
+  if (fs.existsSync(markerPath)) {
+    return parseProjectId(fs.readFileSync(markerPath, "utf8"), `.local/${PROJECT_ID_FILE}`);
+  }
+
+  const projectPath = path.join(root, ".local", "project.md");
+  const projectText = readTextIfExists(projectPath);
+  const storedMatch = projectText.match(/^- project_id:\s*(\S+)\s*$/m);
+  if (storedMatch) {
+    const storedId = parseProjectId(storedMatch[1], ".local/project.md");
+    writeProjectId(markerPath, storedId);
+    return storedId;
+  }
+
+  const legacyId = legacyProjectId(root);
+  if (fs.existsSync(getVaultPath(root))) {
+    if (!fs.existsSync(getKeyPath(legacyId)) && !fs.existsSync(getLegacyKeyPath(legacyId))) {
+      throw new Error("project identity cannot be recovered for the existing encrypted storage");
+    }
+    writeProjectId(markerPath, legacyId);
+    return legacyId;
+  }
+
+  const projectId = crypto.randomBytes(16).toString("hex");
+  writeProjectId(markerPath, projectId);
+  return projectId;
+}
+
+function parseProjectId(value, source) {
+  const projectId = String(value).trim();
+  if (!/^[a-f0-9]{32}$/.test(projectId)) {
+    throw new Error(`invalid project identity in ${source}`);
+  }
+  return projectId;
+}
+
+function writeProjectId(markerPath, projectId) {
+  mkdir(path.dirname(markerPath), 0o700);
+  fs.writeFileSync(markerPath, `${projectId}\n`, { mode: 0o600 });
+  setMode(markerPath, 0o600);
+}
+
+function legacyProjectId(root) {
+  return crypto.createHash("sha256").update(root).digest("hex").slice(0, 32);
 }
 
 function getChatId() {
